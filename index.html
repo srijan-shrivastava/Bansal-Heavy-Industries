@@ -50,7 +50,13 @@
   .kpis.alltime .kpi b{color:#8a8d91}
   .kpis.alltime .kpi span{color:#2E3032}
   .striplabel{font-size:10px;letter-spacing:.5px;color:#8a8d91;font-weight:700;
-              padding:5px 14px 2px;background:var(--head);border-bottom:1px solid var(--grid)}
+              padding:4px 14px;background:var(--head);border-bottom:1px solid var(--grid);
+              display:flex;align-items:center;gap:8px}
+  .striplabel select{width:auto;height:22px;font-size:11px;font-weight:700;color:#3c4043;
+              border:1px solid var(--grid);border-radius:3px;background:#fff;padding:0 4px}
+  .striplabel button{font:inherit;font-size:10px;letter-spacing:.5px;color:#8a8d91;
+              border:1px solid var(--grid);border-radius:3px;background:#fff;padding:2px 8px;cursor:pointer}
+  .striplabel button:hover{color:var(--txt)}
   .del{color:#d93025;cursor:pointer;border:none;background:none;font-size:15px;line-height:1}
 </style>
 
@@ -64,7 +70,19 @@
   <span class="who" id="today"></span>
 </header>
 
-<div class="striplabel" id="overallLabel">ALL-TIME TOTALS — FROM GOOGLE SHEET</div>
+<div class="striplabel">
+  <span id="overallLabel">All-Time Totals</span>
+  <select id="rangeSel" aria-label="Summary period">
+    <option value="all" selected>All time</option>
+    <option value="today">Today</option>
+    <option value="yesterday">Yesterday</option>
+    <option value="last3">Last 3 days</option>
+    <option value="last7">Last 7 days</option>
+    <option value="last30">Last 30 days</option>
+    <option value="last365">Last 365 days</option>
+  </select>
+  <button type="button" id="refreshOverall" title="Reload from the sheet">Refresh</button>
+</div>
 <div class="kpis alltime" id="overall"></div>
 <div class="striplabel">THIS SESSION — NOT YET SUBMITTED</div>
 <div class="kpis" id="kpis"></div>
@@ -327,15 +345,20 @@ function jsonp(){
 let OVERALL = {};
 
 async function loadOverall(){
-  document.getElementById('overallLabel').textContent = 'ALL-TIME TOTALS — LOADING…';
+  const lbl = document.getElementById('overallLabel');
+  lbl.textContent = 'Loading\u2026';
   try { OVERALL = await jsonp(); }
   catch(e){ OVERALL = {}; }
-  document.getElementById('overallLabel').textContent = 'ALL-TIME TOTALS — FROM GOOGLE SHEET';
+  lbl.textContent = 'All-Time Totals';
   renderOverall();
 }
 
+document.getElementById('rangeSel').onchange = renderOverall;
+document.getElementById('refreshOverall').onclick = loadOverall;
+
 function renderOverall(){
-  const pairs = OVERALL[SHEETS[active].sheet] || [];
+  const byRange = OVERALL[SHEETS[active].sheet] || {};
+  const pairs = byRange[document.getElementById('rangeSel').value] || [];
   document.getElementById('overall').innerHTML = pairs.length
     ? pairs.map(([l,v]) => `<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join('')
     : `<div class="kpi"><b>ALL-TIME TOTALS</b><span style="font-size:12px;color:#8a8d91">unavailable — check connection</span></div>`;
