@@ -1,0 +1,296 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BHI Fleet — Daily Entry</title>
+<style>
+  :root{
+    --grid:#e2e3e3; --head:#f8f9fa; --sel:#1a73e8; --green:#0f9d58;
+    --txt:#202124; --muted:#5f6368; --ro:#f1f3f4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.4 Arial,Roboto,sans-serif;color:var(--txt);background:#fff}
+  header{padding:10px 14px;border-bottom:1px solid var(--grid);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:500}
+  .who{font-size:12px;color:var(--muted)}
+  .who input{font:inherit;border:1px solid var(--grid);border-radius:4px;padding:3px 6px}
+  /* tab strip like Sheets (bottom bar) */
+  .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--head);border-top:1px solid var(--grid);
+          display:flex;align-items:center;gap:2px;padding:0 10px;height:44px;z-index:5}
+  .tab{padding:0 16px;height:44px;line-height:44px;font-size:13px;cursor:pointer;color:var(--muted);
+       border:none;background:none;font-family:inherit}
+  .tab[aria-selected="true"]{background:#fff;color:var(--green);font-weight:700;box-shadow:0 -2px 0 var(--green) inset}
+  .tabbar .spacer{flex:1}
+  .kpis{display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--grid);background:var(--head)}
+  .kpi{padding:6px 14px;border-right:1px solid var(--grid);min-width:150px}
+  .kpi b{display:block;font-size:10px;letter-spacing:.5px;color:var(--muted);font-weight:700}
+  .kpi span{font-size:15px;font-weight:700}
+  .wrap{overflow:auto;padding-bottom:96px}
+  table{border-collapse:collapse;width:max-content;min-width:100%}
+  th,td{border:1px solid var(--grid);padding:0;height:28px;white-space:nowrap}
+  th{background:var(--head);font-size:12px;font-weight:700;padding:0 8px;text-align:left;position:sticky;top:0;z-index:2}
+  td.rownum,th.rownum{background:var(--head);text-align:center;color:var(--muted);width:38px;
+       font-size:11px;position:sticky;left:0;z-index:1;padding:0 4px}
+  th.rownum{z-index:3}
+  input,select{width:100%;height:26px;border:none;padding:0 6px;font:inherit;background:transparent;outline:none}
+  input:focus,select:focus{box-shadow:0 0 0 2px var(--sel) inset}
+  td.calc{background:var(--ro);color:#3c4043;padding:0 6px;text-align:right;font-variant-numeric:tabular-nums}
+  td.num input{text-align:right}
+  .bar{position:fixed;bottom:44px;left:0;right:0;background:#fff;border-top:1px solid var(--grid);
+       padding:8px 14px;display:flex;gap:10px;align-items:center;z-index:4}
+  button.act{font:inherit;padding:7px 14px;border-radius:4px;border:1px solid var(--grid);background:#fff;cursor:pointer}
+  button.primary{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
+  button.primary:disabled{opacity:.5;cursor:default}
+  .msg{font-size:12px}
+  .msg.ok{color:var(--green)} .msg.err{color:#d93025}
+  .del{color:#d93025;cursor:pointer;border:none;background:none;font-size:15px;line-height:1}
+</style>
+
+<header>
+  <h1>Bansal Heavy Industries — Daily Entry</h1>
+  <label class="who">Filled by <input id="filledBy" placeholder="your name"></label>
+  <span class="who" id="today"></span>
+</header>
+
+<div class="kpis" id="kpis"></div>
+<div class="wrap"><div id="pane"></div></div>
+
+<div class="bar">
+  <button class="act" id="addRow">+ Add row</button>
+  <button class="act" id="addFive">+ 5 rows</button>
+  <div style="flex:1"></div>
+  <span class="msg" id="msg"></span>
+  <button class="act primary" id="submit">Submit all three logs</button>
+</div>
+
+<div class="tabbar" role="tablist" id="tabs"></div>
+
+<script>
+/* ============================================================
+   1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
+   ============================================================ */
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
+
+const CLIENTS = {                 // client -> revenue rate Rs/tonne
+  "JPL":   450,
+  "NALCO": 520
+};
+const TRUCKS = {                  // truck -> capacity in tonnes
+  "TRK-01": 12,
+  "TRK-02": 12.4
+};
+const DRIVERS   = ["Ramesh","Suresh","Manoj"];
+const SHIFTS    = ["Day","Night"];
+const FM_TYPES  = ["Fuel","Repair","Maintenance"];
+const CASH_TYPE = ["Credit Received","Expense"];
+const CASH_CAT  = ["Advance Received","Driver Batta","Food/Tea","Toll","Parking",
+                   "Loading/Unloading Charges","Weighbridge Fee","Miscellaneous","Other"];
+const CASH_MODE = ["Cash","UPI","Bank Transfer","Driver","Supervisor","Office","Other"];
+const TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+let   OPENING_BALANCE = 0;        // running balance carried from the sheet; see note below
+
+/* ============================================================
+   2. COLUMN DEFINITIONS (mirror the sheet, left to right)
+   ============================================================ */
+const today = new Date().toISOString().slice(0,10);
+const mmm = d => d ? new Date(d+"T00:00:00")
+      .toLocaleDateString("en-GB",{month:"short",year:"numeric"}).replace(" ","-") : "";
+const n = v => parseFloat(v)||0;
+const rs = v => v===""||v==null ? "" : Number(v).toLocaleString("en-IN",{maximumFractionDigits:2});
+
+const SHEETS = {
+  trip:{
+    label:"Daily Trip Log", sheet:"Daily Trip Log",
+    cols:[
+      {k:"client",   h:"Client Name",             t:"select", o:()=>Object.keys(CLIENTS)},
+      {k:"date",     h:"Date",                    t:"date",   d:()=>today},
+      {k:"month",    h:"Month",                   t:"calc",   f:r=>mmm(r.date)},
+      {k:"shift",    h:"Shift",                   t:"select", o:()=>SHIFTS},
+      {k:"truck",    h:"Truck ID",                t:"select", o:()=>Object.keys(TRUCKS)},
+      {k:"driver",   h:"Driver Name",             t:"select", o:()=>DRIVERS},
+      {k:"tripNo",   h:"Trip No.",                t:"number"},
+      {k:"slipNo",   h:"Weighbridge Slip No.",    t:"text"},
+      {k:"gross",    h:"Gross Weight (kg)",       t:"number"},
+      {k:"tare",     h:"Tare Weight (kg)",        t:"number"},
+      {k:"net",      h:"Net Weight (Tons)",       t:"calc",   f:r=>r.gross===""?"":((n(r.gross)-n(r.tare))/1000).toFixed(3)},
+      {k:"capacity", h:"Truck Capacity (Tonnes)", t:"calc",   f:r=>TRUCKS[r.truck] ?? ""},
+      {k:"rate",     h:"Revenue Rate (Rs/Tonne)", t:"calc",   f:r=>CLIENTS[r.client] ?? ""},
+      {k:"revenue",  h:"Revenue (Rs.)",           t:"calc",   f:r=>r.gross===""?"":rs(((n(r.gross)-n(r.tare))/1000)*(CLIENTS[r.client]||0))}
+    ],
+    kpis:rows=>{
+      const t = rows.reduce((s,r)=>s+(n(r.gross)-n(r.tare))/1000,0);
+      const rev = rows.reduce((s,r)=>s+((n(r.gross)-n(r.tare))/1000)*(CLIENTS[r.client]||0),0);
+      const cap = rows.reduce((s,r)=>s+(TRUCKS[r.truck]||0),0);
+      const trips = rows.filter(r=>r.gross!=="").length;
+      return [["TONNES LIFTED — TODAY",t.toFixed(2)],["TRIPS ENTERED",trips],
+              ["AVG TONNES / TRIP",trips?(t/trips).toFixed(2):"0"],
+              ["REVENUE (Rs.)",rs(rev.toFixed(0))],
+              ["CAPACITY UTILIZATION",cap?((t/cap)*100).toFixed(1)+"%":"0%"]];
+    }
+  },
+  fuel:{
+    label:"Fuel & Maintenance Log", sheet:"Fuel & Maintenance Log",
+    cols:[
+      {k:"date",  h:"Date",                     t:"date",   d:()=>today},
+      {k:"month", h:"Month",                    t:"calc",   f:r=>mmm(r.date)},
+      {k:"truck", h:"Truck ID",                 t:"select", o:()=>Object.keys(TRUCKS)},
+      {k:"odo",   h:"Odometer Reading (km)",    t:"number"},
+      {k:"litres",h:"Litres Filled",            t:"number"},
+      {k:"rate",  h:"Rate / Litre",             t:"number"},
+      {k:"cost",  h:"Total Fuel Cost (Rs.)",    t:"costcell"},
+      {k:"type",  h:"Type",                     t:"select", o:()=>FM_TYPES, d:()=>"Fuel"},
+      {k:"desc",  h:"Description / Invoice Ref.",t:"text",  w:220},
+      {k:"client",h:"Client Name",              t:"select", o:()=>Object.keys(CLIENTS)}
+    ],
+    kpis:rows=>{
+      const fuel = rows.filter(r=>r.type==="Fuel");
+      const fc = fuel.reduce((s,r)=>s+n(r.litres)*n(r.rate),0);
+      const rc = rows.filter(r=>r.type!=="Fuel").reduce((s,r)=>s+n(r.cost),0);
+      const l  = fuel.reduce((s,r)=>s+n(r.litres),0);
+      return [["FUEL COST TODAY (Rs.)",rs(fc.toFixed(0))],["REPAIR / MAINT (Rs.)",rs(rc.toFixed(0))],
+              ["LITRES FILLED",l.toFixed(1)],["AVG RATE / LITRE",l?(fc/l).toFixed(2):"0"]];
+    }
+  },
+  cash:{
+    label:"Cash Log", sheet:"Cash Log",
+    cols:[
+      {k:"date",  h:"Date",                      t:"date",   d:()=>today},
+      {k:"type",  h:"Type",                      t:"select", o:()=>CASH_TYPE, d:()=>"Expense"},
+      {k:"truck", h:"Truck ID (optional)",       t:"select", o:()=>TRUCK_OPT, blank:true},
+      {k:"cat",   h:"Category",                  t:"select", o:()=>CASH_CAT},
+      {k:"desc",  h:"Description / Notes",       t:"text",   w:220},
+      {k:"in",    h:"Amount In — Credit (Rs.)",  t:"number"},
+      {k:"out",   h:"Amount Out — Expense (Rs.)",t:"number"},
+      {k:"mode",  h:"Paid By / Mode",            t:"select", o:()=>CASH_MODE},
+      {k:"bal",   h:"Running Balance (Rs.)",     t:"calc",   f:(r,i,rows)=>{
+          let b = OPENING_BALANCE;
+          for(let j=0;j<=i;j++) b += n(rows[j].in)-n(rows[j].out);
+          return r.date===""?"":rs(b.toFixed(2));
+      }},
+      {k:"client",h:"Client Name",               t:"select", o:()=>Object.keys(CLIENTS)}
+    ],
+    kpis:rows=>{
+      const cin = rows.reduce((s,r)=>s+n(r.in),0), cout = rows.reduce((s,r)=>s+n(r.out),0);
+      return [["CREDITED TODAY (Rs.)",rs(cin.toFixed(0))],["SPENT TODAY (Rs.)",rs(cout.toFixed(0))],
+              ["CLOSING BALANCE (Rs.)",rs((OPENING_BALANCE+cin-cout).toFixed(2))]];
+    }
+  }
+};
+
+/* ============================================================
+   3. STATE + RENDER
+   ============================================================ */
+const blank = key => Object.fromEntries(SHEETS[key].cols.map(c=>[c.k, c.d?c.d():""]));
+const data = {trip:[],fuel:[],cash:[]};
+Object.keys(data).forEach(k=>{ for(let i=0;i<3;i++) data[k].push(blank(k)); });
+let active = "trip";
+
+document.getElementById("today").textContent =
+  new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+
+function render(){
+  const S = SHEETS[active], rows = data[active];
+
+  document.getElementById("kpis").innerHTML = S.kpis(rows)
+    .map(([l,v])=>`<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join("");
+
+  let h = "<table><thead><tr><th class='rownum'>#</th>"
+        + S.cols.map(c=>`<th${c.w?` style="min-width:${c.w}px"`:""}>${c.h}</th>`).join("")
+        + "<th class='rownum'></th></tr></thead><tbody>";
+
+  rows.forEach((r,i)=>{
+    h += `<tr><td class="rownum">${i+1}</td>`;
+    S.cols.forEach(c=>{
+      const v = r[c.k] ?? "";
+      if(c.t==="calc"){
+        h += `<td class="calc">${c.f(r,i,rows)}</td>`;
+      } else if(c.t==="costcell"){
+        // auto for Fuel rows, typed for Repair / Maintenance
+        h += r.type==="Fuel"
+           ? `<td class="calc">${r.litres===""?"":rs((n(r.litres)*n(r.rate)).toFixed(2))}</td>`
+           : `<td class="num"><input type="number" step="0.01" data-k="cost" data-i="${i}" value="${v}"></td>`;
+      } else if(c.t==="select"){
+        const opts = ["",...c.o()].map(o=>`<option${o===v?" selected":""}>${o}</option>`).join("");
+        h += `<td><select data-k="${c.k}" data-i="${i}">${opts}</select></td>`;
+      } else {
+        const num = c.t==="number";
+        h += `<td class="${num?"num":""}"><input type="${c.t}"${num?' step="any"':""} data-k="${c.k}" data-i="${i}" value="${v}"></td>`;
+      }
+    });
+    h += `<td class="rownum"><button class="del" data-del="${i}" title="Delete row">×</button></td></tr>`;
+  });
+
+  document.getElementById("pane").innerHTML = h + "</tbody></table>";
+}
+
+function renderTabs(){
+  document.getElementById("tabs").innerHTML =
+    Object.entries(SHEETS).map(([k,s])=>{
+      const filled = data[k].filter(rowFilled).length;
+      return `<button class="tab" role="tab" data-tab="${k}" aria-selected="${k===active}">`
+           + `${s.label}${filled?` (${filled})`:""}</button>`;
+    }).join("") + '<div class="spacer"></div>';
+}
+
+const rowFilled = r => Object.values(r).some(v=>v!==""&&v!=null&&v!=="Fuel"&&v!=="Expense"&&v!==today);
+
+/* ---- events ---- */
+document.getElementById("pane").addEventListener("input", e=>{
+  const t = e.target;
+  if(!t.dataset.k) return;
+  data[active][+t.dataset.i][t.dataset.k] = t.value;
+  const key = t.dataset.k, pos = t.selectionStart;
+  render(); renderTabs();
+  const back = document.querySelector(`[data-k="${key}"][data-i="${t.dataset.i}"]`);
+  if(back){ back.focus(); try{ back.setSelectionRange(pos,pos); }catch(_){} }
+});
+document.getElementById("pane").addEventListener("click", e=>{
+  if(e.target.dataset.del!==undefined){
+    data[active].splice(+e.target.dataset.del,1);
+    if(!data[active].length) data[active].push(blank(active));
+    render(); renderTabs();
+  }
+});
+document.getElementById("tabs").addEventListener("click", e=>{
+  const t = e.target.closest("[data-tab]"); if(!t) return;
+  active = t.dataset.tab; render(); renderTabs();
+});
+document.getElementById("addRow").onclick  = ()=>{ data[active].push(blank(active)); render(); renderTabs(); };
+document.getElementById("addFive").onclick = ()=>{ for(let i=0;i<5;i++) data[active].push(blank(active)); render(); renderTabs(); };
+
+/* ---- submit ---- */
+document.getElementById("submit").onclick = async ()=>{
+  const msg = document.getElementById("msg"), btn = document.getElementById("submit");
+  const filledBy = document.getElementById("filledBy").value.trim();
+  if(!filledBy){ msg.className="msg err"; msg.textContent="Enter your name first."; return; }
+
+  const payload = {filledBy, submittedAt:new Date().toISOString(), blocks:{}};
+  let total = 0;
+  for(const k of Object.keys(SHEETS)){
+    const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
+      const out = {};
+      SHEETS[k].cols.forEach(c=>{
+        out[c.h] = c.t==="calc" ? String(c.f(r,i,arr)).replace(/,/g,"")
+                 : c.t==="costcell" && r.type==="Fuel" ? (n(r.litres)*n(r.rate)).toFixed(2)
+                 : r[c.k];
+      });
+      return out;
+    });
+    payload.blocks[SHEETS[k].sheet] = rows;
+    total += rows.length;
+  }
+  if(!total){ msg.className="msg err"; msg.textContent="Nothing to submit yet."; return; }
+
+  btn.disabled = true; msg.className="msg"; msg.textContent="Sending…";
+  try{
+    await fetch(ENDPOINT,{method:"POST",mode:"no-cors",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
+    msg.className="msg ok"; msg.textContent = `Submitted ${total} rows.`;
+    Object.keys(data).forEach(k=>{ data[k]=[blank(k),blank(k),blank(k)]; });
+    render(); renderTabs();
+  }catch(err){
+    msg.className="msg err"; msg.textContent="Send failed — check your connection and try again.";
+  }
+  btn.disabled = false;
+};
+
+render(); renderTabs();
+</script>
