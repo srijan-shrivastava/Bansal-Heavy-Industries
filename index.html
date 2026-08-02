@@ -346,12 +346,23 @@ let OVERALL = {};
 
 async function loadOverall(){
   const lbl = document.getElementById('overallLabel');
-  lbl.textContent = 'Loading\u2026';
-  try { OVERALL = await jsonp(); }
-  catch(e){ OVERALL = {}; }
-  lbl.textContent = 'All-Time Totals';
+  lbl.textContent = 'Refreshing\u2026';
+  try {
+    OVERALL = await jsonp();
+    try { localStorage.setItem('bhi_summary', JSON.stringify(OVERALL)); } catch(_){}
+    lbl.textContent = 'All-Time Totals';
+  } catch(e) {
+    lbl.textContent = OVERALL && Object.keys(OVERALL).length
+      ? 'All-Time Totals (last known)' : 'All-Time Totals';
+  }
   renderOverall();
 }
+
+// paint the previous figures instantly, then refresh in the background
+try {
+  const cached = localStorage.getItem('bhi_summary');
+  if (cached) OVERALL = JSON.parse(cached);
+} catch(_){}
 
 document.getElementById('rangeSel').onchange = renderOverall;
 document.getElementById('refreshOverall').onclick = loadOverall;
