@@ -1,6 +1,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BHI Fleet — Daily Entry</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2E3032">
 <style>
   :root{
     --grid:#e2e3e3; --head:#f8f9fa; --sel:#1a73e8; --green:#0f9d58;
@@ -45,6 +50,10 @@
 </style>
 
 <header>
+  <svg viewBox="0 0 100 100" width="26" height="26" aria-hidden="true">
+    <path d="M42,18 H58 L88,84 H72 L50,36 L28,84 H12 Z" fill="#2E3032"/>
+    <path d="M50,50 L66,84 H34 Z" fill="#EF7F1F"/>
+  </svg>
   <h1>Bansal Heavy Industries — Daily Entry</h1>
   <label class="who">Filled by <input id="filledBy" placeholder="your name"></label>
   <span class="who" id="today"></span>
@@ -67,7 +76,7 @@
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
+const ENDPOINT = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
 
 const CLIENTS = {                 // client -> revenue rate Rs/tonne
   "JPL":   450,
