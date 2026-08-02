@@ -39,6 +39,10 @@
   input:focus,select:focus{box-shadow:0 0 0 2px var(--sel) inset}
   td.calc{background:var(--ro);color:#3c4043;padding:0 6px;text-align:right;font-variant-numeric:tabular-nums}
   td.num input{text-align:right}
+  /* hide the native up/down spinners on number fields */
+  input[type=number]{-moz-appearance:textfield;appearance:textfield}
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .bar{position:fixed;bottom:44px;left:0;right:0;background:#fff;border-top:1px solid var(--grid);
        padding:8px 14px;display:flex;gap:10px;align-items:center;z-index:4}
   button.act{font:inherit;padding:7px 14px;border-radius:4px;border:1px solid var(--grid);background:#fff;cursor:pointer}
@@ -104,22 +108,18 @@
    ============================================================ */
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
 
-const CLIENTS = {                 // client -> revenue rate Rs/tonne
-  "JPL":   450,
-  "NALCO": 520
-};
-const TRUCKS = {                  // truck -> capacity in tonnes
-  "TRK-01": 12,
-  "TRK-02": 12.4
-};
-const DRIVERS   = ["Ramesh","Suresh","Manoj"];
+/* These are only a fallback for the first load or when offline. The live
+   values come from 'Settings & Fixed Costs' via getLists(). */
+let CLIENTS = { "JPL": 450, "NALCO": 520 };
+let TRUCKS  = { "TRK-01": 12, "TRK-02": 12.4 };
+let DRIVERS = ["Ramesh","Suresh","Manoj"];
 const SHIFTS    = ["Day","Night"];
 const FM_TYPES  = ["Fuel","Repair","Maintenance"];
 const CASH_TYPE = ["Credit Received","Expense"];
 const CASH_CAT  = ["Advance Received","Driver Batta","Food/Tea","Toll","Parking",
                    "Loading/Unloading Charges","Weighbridge Fee","Miscellaneous","Other"];
 const CASH_MODE = ["Cash","UPI","Bank Transfer","Driver","Supervisor","Office","Other"];
-const TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+let TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
 let   OPENING_BALANCE = 0;        // running balance carried from the sheet; see note below
 
 /* ============================================================
@@ -348,8 +348,10 @@ async function loadOverall(){
   const lbl = document.getElementById('overallLabel');
   lbl.textContent = 'Refreshing\u2026';
   try {
-    OVERALL = await jsonp();
-    try { localStorage.setItem('bhi_summary', JSON.stringify(OVERALL)); } catch(_){}
+    const res = await jsonp();
+    OVERALL = res.summary || res;          // tolerate the older payload shape
+    if (res.lists) applyLists(res.lists);
+    try { localStorage.setItem('bhi_payload', JSON.stringify(res)); } catch(_){}
     lbl.textContent = 'All-Time Totals';
   } catch(e) {
     lbl.textContent = OVERALL && Object.keys(OVERALL).length
@@ -358,10 +360,23 @@ async function loadOverall(){
   renderOverall();
 }
 
-// paint the previous figures instantly, then refresh in the background
+function applyLists(L){
+  if (L.clients && Object.keys(L.clients).length) CLIENTS = L.clients;
+  if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
+  if (L.drivers && L.drivers.length)              DRIVERS = L.drivers;
+  TRUCK_OPT = (L.costCentres && L.costCentres.length)
+    ? L.costCentres
+    : Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+}
+
+// paint the previous figures and lists instantly, then refresh in the background
 try {
-  const cached = localStorage.getItem('bhi_summary');
-  if (cached) OVERALL = JSON.parse(cached);
+  const cached = localStorage.getItem('bhi_payload');
+  if (cached) {
+    const res = JSON.parse(cached);
+    OVERALL = res.summary || res;
+    if (res.lists) applyLists(res.lists);
+  }
 } catch(_){}
 
 document.getElementById('rangeSel').onchange = renderOverall;
