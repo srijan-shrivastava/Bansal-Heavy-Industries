@@ -1,2 +1,2 @@
-# Bansal-Heavy-Industry-Kanha-
+# Bansal-Heavy-Industry
 Contains all the codes related to BHI Data
