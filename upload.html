@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BHI — Trip Documents</title>
+<title>BHI — Trip Photos</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#2E3032">
@@ -35,6 +35,8 @@
   .tick{font-size:19px;color:var(--grid)}
   .card.done .tick{color:var(--green)}
 
+  .saved{font-size:12px;color:var(--green);padding:8px 14px 0;font-weight:600}
+  .saved a{color:var(--green)}
   .shots{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px}
   .thumb{position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;background:var(--head)}
   .thumb img{width:100%;height:100%;object-fit:cover;display:block}
@@ -81,6 +83,7 @@
   <div class="note" id="note">Photos stay on your phone until you tap Upload.</div>
 </div>
 
+<script src="pdf.min.js"></script>
 <script>
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
 
@@ -137,15 +140,17 @@ function render(){
   list.innerHTML = TRIPS.map(t => {
     const shots = SHOTS[t.row] || [];
     return `
-      <div class="card ${shots.length ? 'done' : ''}" data-row="${t.row}">
+      <div class="card ${(shots.length || t.photoUrl) ? 'done' : ''}" data-row="${t.row}">
         <div class="chead">
           <span class="truck">${esc(t.truck || '—')}</span>
           <div class="meta">
             <div class="l1">Trip ${esc(t.tripNo || '?')} · Slip ${esc(t.slip || '—')}</div>
             <div class="l2">${esc(t.client || '')} · ${esc(t.shift || '')} · ${esc(t.tonnes || '')} t</div>
           </div>
-          <span class="tick">${shots.length ? '✓' : '○'}</span>
+          <span class="tick">${t.photoUrl ? '✓' : (shots.length ? '●' : '○')}</span>
         </div>
+        ${t.photoUrl ? `<div class="saved">PDF saved &middot;
+             <a href="${esc(t.photoUrl)}" target="_blank" rel="noopener">open</a></div>` : ''}
         <div class="shots">
           ${shots.map(s => `
             <div class="thumb">
@@ -201,11 +206,11 @@ document.addEventListener('change', async e => {
   const row = pickRow;
   for (const f of files){
     try {
-      const dataUrl = await shrink(f);
+      const shot = await shrink(f);
       (SHOTS[row] = SHOTS[row] || []).push({
         id: 's' + Math.random().toString(36).slice(2),
         name: f.name || 'photo.jpg',
-        dataUrl
+        dataUrl: shot.dataUrl, w: shot.w, h: shot.h
       });
     } catch(_){}
   }
@@ -232,7 +237,7 @@ function shrink(file, max = 1600, quality = 0.82){
         const c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', quality));
+        resolve({ dataUrl: c.toDataURL('image/jpeg', quality), w, h });
       };
       img.src = fr.result;
     };
@@ -240,35 +245,103 @@ function shrink(file, max = 1600, quality = 0.82){
   });
 }
 
-/* ---------- upload (storage wired up in the next step) ---------- */
+/* ---------- build one PDF per trip, upload each to Drive ---------- */
+
+const b64ToBin = b64 => atob(b64);
+const binToB64 = bin => {
+  let out = '', chunk = 0x8000;
+  for (let i = 0; i < bin.length; i += chunk){
+    out += String.fromCharCode.apply(null,
+      Array.from(bin.slice(i, i + chunk), c => c.charCodeAt(0) & 0xff));
+  }
+  return btoa(out);
+};
+
+function pdfForTrip(trip, shots){
+  const images = shots.map(s => ({
+    bin: b64ToBin(s.dataUrl.split(',')[1]),
+    w: s.w, h: s.h,
+    caption: [trip.truck, 'Trip ' + (trip.tripNo || '?'),
+              'Slip ' + (trip.slip || '-'), trip.date,
+              trip.client].filter(Boolean).join('  |  ')
+  }));
+  return binToB64(buildPdfFromJpegs(images));
+}
+
+function post(body){
+  return fetch(ENDPOINT, {
+    method: 'POST', mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body)
+  });
+}
+
 document.getElementById('send').onclick = async () => {
   const btn = document.getElementById('send'), note = document.getElementById('note');
-
-  const payload = {
-    batchId: BATCH,
-    photos: Object.keys(SHOTS).map(row => ({
-      row: Number(row),
-      trip: TRIPS.find(t => String(t.row) === String(row)) || null,
-      files: SHOTS[row].map(s => ({ name: s.name, dataUrl: s.dataUrl }))
-    }))
-  };
-
-  const count = payload.photos.reduce((s, p) => s + p.files.length, 0);
-  const mb = (JSON.stringify(payload).length / 1048576).toFixed(1);
+  const rows = Object.keys(SHOTS).filter(r => SHOTS[r].length);
+  if (!rows.length) return;
 
   btn.disabled = true;
   note.className = 'note';
-  note.textContent = 'Preparing ' + count + ' photos (' + mb + ' MB)…';
 
-  // TODO: POST `payload` to Apps Script, which writes each file to Drive and
-  // puts the resulting link in the matching Daily Trip Log row.
-  console.log('READY TO UPLOAD', payload);
+  let sent = 0;
+  for (const row of rows){
+    const trip = TRIPS.find(t => String(t.row) === String(row)) || { row: Number(row) };
+    note.textContent = 'Building PDF ' + (sent + 1) + ' of ' + rows.length + '\u2026';
+    let pdfB64;
+    try {
+      pdfB64 = pdfForTrip(trip, SHOTS[row]);
+    } catch (err){
+      note.className = 'note err';
+      note.textContent = 'Could not build the PDF for trip ' + (trip.tripNo || row) + '.';
+      btn.disabled = false;
+      return;
+    }
 
-  setTimeout(() => {
-    note.className = 'note err';
-    note.textContent = 'Drive upload not connected yet — photos are held on this phone.';
-    btn.disabled = false;
-  }, 700);
+    note.textContent = 'Uploading ' + (sent + 1) + ' of ' + rows.length +
+                       ' (' + (pdfB64.length / 1398101).toFixed(1) + ' MB)\u2026';
+    try {
+      // One request per trip keeps each well under Apps Script's size cap.
+      await post({
+        kind: 'photos',
+        batchId: BATCH,
+        row: Number(row),
+        pages: SHOTS[row].length,
+        trip: trip,
+        pdfBase64: pdfB64
+      });
+      sent++;
+    } catch (err){
+      note.className = 'note err';
+      note.textContent = 'Upload failed at trip ' + (trip.tripNo || row) +
+                         '. Reconnect and tap Upload again.';
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  // no-cors gives no response, so confirm by re-reading the batch.
+  note.textContent = 'Confirming\u2026';
+  await new Promise(r => setTimeout(r, 2500));
+  try {
+    const res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
+    const saved = (res.trips || []).filter(t => t.photoUrl).length;
+    if (saved >= rows.length){
+      TRIPS = res.trips;
+      rows.forEach(r => delete SHOTS[r]);
+      note.className = 'note ok';
+      note.textContent = 'Saved ' + saved + ' PDFs to Drive.';
+      render();
+    } else {
+      note.className = 'note err';
+      note.textContent = saved + ' of ' + rows.length +
+        ' confirmed. Wait a moment and tap Upload again for the rest.';
+    }
+  } catch (err){
+    note.className = 'note';
+    note.textContent = 'Uploaded. Could not confirm \u2014 check the sheet.';
+  }
+  btn.disabled = false;
 };
 
 load();
