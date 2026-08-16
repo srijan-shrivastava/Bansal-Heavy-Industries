@@ -259,11 +259,11 @@ function render(){
     S.cols.forEach(c=>{
       const v = r[c.k] ?? "";
       if(c.t==="calc"){
-        h += `<td class="calc">${c.f(r,i,rows)}</td>`;
+        h += `<td class="calc" data-calc="${i}|${c.k}">${c.f(r,i,rows)}</td>`;
       } else if(c.t==="costcell"){
         // auto for Fuel rows, typed for Repair / Maintenance
         h += r.type==="Fuel"
-           ? `<td class="calc">${r.litres===""?"":rs((n(r.litres)*n(r.rate)).toFixed(2))}</td>`
+           ? `<td class="calc" data-calc="${i}|cost">${r.litres===""?"":rs((n(r.litres)*n(r.rate)).toFixed(2))}</td>`
            : `<td class="num"><input type="number" step="0.01" data-k="cost" data-i="${i}" value="${v}"></td>`;
       } else if(c.t==="select"){
         const opts = ["",...c.o()].map(o=>`<option${o===v?" selected":""}>${o}</option>`).join("");
@@ -277,6 +277,26 @@ function render(){
   });
 
   document.getElementById("pane").innerHTML = h + "</tbody></table>";
+}
+
+/* Update only the grey calculated cells and the KPI strips. Rebuilding the
+   whole table on each keystroke destroyed the focused input and reset the
+   caret, which reversed typed digits on number fields. */
+function refreshDerived(){
+  const S = SHEETS[active], rows = data[active];
+  document.querySelectorAll('#pane td[data-calc]').forEach(td => {
+    const [i, k] = td.dataset.calc.split('|');
+    const r = rows[+i];
+    if (!r) return;
+    if (k === 'cost'){
+      td.textContent = r.litres === "" ? "" : rs((n(r.litres) * n(r.rate)).toFixed(2));
+    } else {
+      const col = S.cols.find(c => c.k === k);
+      if (col) td.textContent = col.f(r, +i, rows);
+    }
+  });
+  document.getElementById("kpis").innerHTML = S.kpis(rows)
+    .map(([l,v])=>`<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join("");
 }
 
 function renderTabs(){
@@ -295,10 +315,13 @@ document.getElementById("pane").addEventListener("input", e=>{
   const t = e.target;
   if(!t.dataset.k) return;
   data[active][+t.dataset.i][t.dataset.k] = t.value;
-  const key = t.dataset.k, pos = t.selectionStart;
-  render(); renderTabs();
-  const back = document.querySelector(`[data-k="${key}"][data-i="${t.dataset.i}"]`);
-  if(back){ back.focus(); try{ back.setSelectionRange(pos,pos); }catch(_){} }
+
+  // Changing Type on the Fuel tab swaps the cost cell between a formula
+  // display and an editable input, so that one case needs a real rebuild.
+  const structural = (active === 'fuel' && t.dataset.k === 'type');
+  if (structural){ render(); }
+  else { refreshDerived(); }
+  renderTabs();
 });
 document.getElementById("pane").addEventListener("click", e=>{
   if(e.target.dataset.del!==undefined){
