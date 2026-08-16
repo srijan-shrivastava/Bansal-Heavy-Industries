@@ -427,6 +427,8 @@ async function loadOverall(){
   renderOverall();
 }
 
+let LISTS_STAMP = '';
+
 function applyLists(L){
   if (L.clients && Object.keys(L.clients).length) CLIENTS = L.clients;
   if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
@@ -435,6 +437,13 @@ function applyLists(L){
   TRUCK_OPT = (L.costCentres && L.costCentres.length)
     ? L.costCentres
     : Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+
+  // If the roster actually changed, redraw so open dropdowns pick it up.
+  const stamp = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  if (stamp !== LISTS_STAMP){
+    LISTS_STAMP = stamp;
+    if (document.getElementById('pane').innerHTML) { render(); renderTabs(); }
+  }
 }
 
 // paint the previous figures and lists instantly, then refresh in the background
