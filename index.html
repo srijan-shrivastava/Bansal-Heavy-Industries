@@ -19,6 +19,11 @@
   .who{font-size:12px;color:var(--muted)}
   .who input,.who select{font:inherit;border:1px solid var(--grid);border-radius:4px;
        padding:3px 6px;width:auto;height:auto;background:#fff}
+  .who button{font:inherit;font-size:11px;border:1px solid var(--grid);border-radius:4px;
+       background:#fff;padding:3px 8px;cursor:pointer;color:var(--muted)}
+  .who button:hover{color:var(--txt)}
+  #tripDate{font-weight:700}
+  .backdated{background:#fff4e5!important}
   /* tab strip like Sheets (bottom bar) */
   .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--head);border-top:1px solid var(--grid);
           display:flex;align-items:center;gap:2px;padding:0 10px;height:44px;z-index:5}
@@ -82,6 +87,10 @@
   </svg>
   <h1>Bansal Heavy Industries — Daily Entry</h1>
   <label class="who">Filled by <input id="filledBy" placeholder="your name"></label>
+  <label class="who">Trip date
+    <input type="date" id="tripDate">
+    <button type="button" id="applyDate" title="Set this date on every row in all three tabs">Apply to all rows</button>
+  </label>
   <span class="who" id="today"></span>
 </header>
 
@@ -129,7 +138,7 @@
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
 
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
@@ -150,6 +159,9 @@ let   OPENING_BALANCE = 0;        // running balance carried from the sheet; see
    2. COLUMN DEFINITIONS (mirror the sheet, left to right)
    ============================================================ */
 const today = new Date().toISOString().slice(0,10);
+// The date the work actually happened. Entry often lags the trip by a day or
+// more, so this drives both the sheet rows and the Drive folder / file name.
+let tripDate = today;
 const mmm = d => d ? new Date(d+"T00:00:00")
       .toLocaleDateString("en-GB",{month:"short",year:"numeric"}).replace(" ","-") : "";
 const n = v => parseFloat(v)||0;
@@ -160,7 +172,7 @@ const SHEETS = {
     label:"Daily Trip Log", sheet:"Daily Trip Log",
     cols:[
       {k:"client",   h:"Client Name",             t:"select", o:()=>Object.keys(CLIENTS)},
-      {k:"date",     h:"Date",                    t:"date",   d:()=>today},
+      {k:"date",     h:"Date",                    t:"date",   d:()=>tripDate},
       {k:"month",    h:"Month",                   t:"calc",   f:r=>mmm(r.date)},
       {k:"shift",    h:"Shift",                   t:"select", o:()=>SHIFTS},
       {k:"truck",    h:"Truck ID",                t:"select", o:()=>Object.keys(TRUCKS)},
@@ -188,7 +200,7 @@ const SHEETS = {
   fuel:{
     label:"Fuel & Maintenance Log", sheet:"Fuel & Maintenance Log",
     cols:[
-      {k:"date",  h:"Date",                     t:"date",   d:()=>today},
+      {k:"date",  h:"Date",                     t:"date",   d:()=>tripDate},
       {k:"month", h:"Month",                    t:"calc",   f:r=>mmm(r.date)},
       {k:"truck", h:"Truck ID",                 t:"select", o:()=>Object.keys(TRUCKS)},
       {k:"odo",   h:"Odometer Reading (km)",    t:"number"},
@@ -211,7 +223,7 @@ const SHEETS = {
   cash:{
     label:"Cash Log", sheet:"Cash Log",
     cols:[
-      {k:"date",  h:"Date",                      t:"date",   d:()=>today},
+      {k:"date",  h:"Date",                      t:"date",   d:()=>tripDate},
       {k:"type",  h:"Type",                      t:"select", o:()=>CASH_TYPE, d:()=>"Expense"},
       {k:"truck", h:"Truck ID (optional)",       t:"select", o:()=>TRUCK_OPT, blank:true},
       {k:"cat",   h:"Category",                  t:"select", o:()=>CASH_CAT},
@@ -242,6 +254,32 @@ const data = {trip:[],fuel:[],cash:[]};
 Object.keys(data).forEach(k=>{ for(let i=0;i<3;i++) data[k].push(blank(k)); });
 let active = "trip";
 
+const tripDateEl = document.getElementById('tripDate');
+tripDateEl.value = tripDate;
+tripDateEl.max = today;          // no future-dating trips
+
+tripDateEl.onchange = () => {
+  tripDate = tripDateEl.value || today;
+  // Rows still on the old default follow along; anything hand-edited is left be.
+  Object.keys(data).forEach(k => data[k].forEach(r => {
+    if (!rowFilled(r)) r.date = tripDate;
+  }));
+  markBackdated();
+  render(); renderTabs();
+};
+
+document.getElementById('applyDate').onclick = () => {
+  tripDate = tripDateEl.value || today;
+  Object.keys(data).forEach(k => data[k].forEach(r => { r.date = tripDate; }));
+  markBackdated();
+  render(); renderTabs();
+};
+
+// Tint the field when it is not today, so a stale date cannot slip past unnoticed.
+function markBackdated(){
+  tripDateEl.classList.toggle('backdated', tripDate !== today);
+}
+
 document.getElementById("today").textContent =
   new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
@@ -270,6 +308,8 @@ function render(){
       } else if(c.t==="select"){
         const opts = ["",...c.o()].map(o=>`<option${o===v?" selected":""}>${o}</option>`).join("");
         h += `<td><select data-k="${c.k}" data-i="${i}">${opts}</select></td>`;
+      } else if(c.t==="date"){
+        h += `<td><input type="date" data-k="${c.k}" data-i="${i}" value="${v}"></td>`;
       } else {
         const num = c.t==="number";
         h += `<td><input type="text"${num?' inputmode="decimal" data-num="1"':""}`
@@ -311,7 +351,8 @@ function renderTabs(){
     }).join("") + '<div class="spacer"></div>';
 }
 
-const rowFilled = r => Object.values(r).some(v=>v!==""&&v!=null&&v!=="Fuel"&&v!=="Expense"&&v!==today);
+const rowFilled = r => Object.values(r).some(
+  v => v!=="" && v!=null && v!=="Fuel" && v!=="Expense" && v!==today && v!==tripDate);
 
 /* ---- events ---- */
 document.getElementById("pane").addEventListener("input", e=>{
