@@ -131,7 +131,7 @@
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
-                 
+
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
 let CLIENTS = { "JPL": 450, "NALCO": 520 };
@@ -168,9 +168,15 @@ const SHEETS = {
       {k:"driver",   h:"Driver Name",             t:"select", o:()=>DRIVERS},
       {k:"tripNo",   h:"Trip No.",                t:"number"},
       {k:"slipNo",   h:"Weighbridge Slip No.",    t:"text"},
-      {k:"gross",    h:"Gross Weight (in Tonnes)",       t:"number"},
-      {k:"tare",     h:"Tare Weight (In Tonnes)",        t:"number"},
-      {k:"net",      h:"Net Weight (in Tonnes)",       t:"calc",   f:r=>r.gross===""?"":((n(r.gross)-n(r.tare))/1000).toFixed(3)},
+      // Entered in KILOGRAMS off the weighbridge slip, stored in the sheet as
+      // TONNES. `lab` is what the operator sees, `h` is the sheet header the
+      // value is written under, `toSheet` does the conversion on submit.
+      {k:"gross",    h:"Gross Weight (in Tonnes)", lab:"Gross Weight (kg)",
+       t:"number", toSheet:v => v==="" ? "" : (n(v)/1000).toFixed(3)},
+      {k:"tare",     h:"Tare Weight (In Tonnes)",  lab:"Tare Weight (kg)",
+       t:"number", toSheet:v => v==="" ? "" : (n(v)/1000).toFixed(3)},
+      {k:"net",      h:"Net Weight (in Tonnes)",   lab:"Net Weight (Tonnes)",
+       t:"calc",   f:r=>r.gross===""?"":((n(r.gross)-n(r.tare))/1000).toFixed(3)},
       {k:"capacity", h:"Truck Capacity (in Tonnes)", t:"calc",   f:r=>TRUCKS[r.truck] ?? ""}
       // Revenue Rate and Revenue are deliberately not shown here. The sheet
       // still calculates both from its own formulas; they are simply not
@@ -253,7 +259,7 @@ function render(){
     .map(([l,v])=>`<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join("");
 
   let h = "<table><thead><tr><th class='rownum'>#</th>"
-        + S.cols.map(c=>`<th${c.w?` style="min-width:${c.w}px"`:""}>${c.h}</th>`).join("")
+        + S.cols.map(c=>`<th${c.w?` style="min-width:${c.w}px"`:""}>${c.lab||c.h}</th>`).join("")
         + "<th class='rownum'></th></tr></thead><tbody>";
 
   rows.forEach((r,i)=>{
@@ -368,9 +374,10 @@ document.getElementById("submit").onclick = async ()=>{
     const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
       const out = {};
       SHEETS[k].cols.forEach(c=>{
-        out[c.h] = c.t==="calc" ? String(c.f(r,i,arr)).replace(/,/g,"")
-                 : c.t==="costcell" && r.type==="Fuel" ? (n(r.litres)*n(r.rate)).toFixed(2)
-                 : r[c.k];
+        const v = c.t==="calc" ? String(c.f(r,i,arr)).replace(/,/g,"")
+                : c.t==="costcell" && r.type==="Fuel" ? (n(r.litres)*n(r.rate)).toFixed(2)
+                : r[c.k];
+        out[c.h] = c.toSheet ? c.toSheet(v) : v;
       });
       return out;
     });
