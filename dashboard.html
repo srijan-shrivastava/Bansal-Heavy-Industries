@@ -117,6 +117,11 @@
 </main>
 
 <script>
+/* MUST be the same /exec URL as the one in index.html. Deploying a NEW
+   DEPLOYMENT (rather than a new version of the existing one) issues a fresh
+   URL; the old one keeps answering from old code, which is why a mismatch
+   shows up as data that loads but is wrong or incomplete rather than as a
+   clean failure. */
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
 
 const esc = s => String(s == null ? '' : s)
@@ -316,7 +321,16 @@ async function load(){
     // example if Dashboard.gs is missing from the Apps Script project, or the
     // deployment is an older version. Caching that reply would poison every
     // later load, so check the shape before trusting it.
-    if (!isValid(d)) throw new Error(d && d.error ? d.error : 'unexpected reply');
+    if (!isValid(d)) {
+      // A reply carrying `summary`/`lists` but no `blocks` is the signature of
+      // an endpoint still serving a deployment from before action=dash existed.
+      if (d && (d.summary || d.lists)) {
+        throw new Error('This endpoint is running an older deployment. Copy the ' +
+                        'ENDPOINT value out of index.html into dashboard.html, ' +
+                        'or redeploy a NEW VERSION of the existing deployment.');
+      }
+      throw new Error(d && d.error ? d.error : 'unexpected reply from the endpoint');
+    }
 
     localStorage.setItem('bhi_dash', JSON.stringify(d));
     lastLoaded = Date.now();
@@ -344,8 +358,8 @@ async function load(){
       document.getElementById('body').innerHTML =
         '<div class="state"><b>Could not load the dashboard</b>' +
         esc(String(err.message || err)) +
-        '<br><br>Check that Dashboard.gs is in the Apps Script project and that ' +
-        'a NEW VERSION has been deployed, then press Refresh.</div>';
+        '<br><br><span style="font-size:11px">Endpoint in use:<br>' +
+        esc(ENDPOINT.slice(0, 62)) + '…</span></div>';
     }
   }
   btn.disabled = false;
