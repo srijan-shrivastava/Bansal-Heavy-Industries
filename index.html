@@ -11,6 +11,7 @@
     --grid:#e2e3e3; --head:#f8f9fa; --sel:#1a73e8; --green:#0f9d58;
     --txt:#202124; --muted:#5f6368; --ro:#f1f3f4;
   }
+  [hidden]{display:none!important}
   *{box-sizing:border-box}
   body{margin:0;font:13px/1.4 Arial,Roboto,sans-serif;color:var(--txt);background:#fff}
   header{padding:10px 14px;border-bottom:1px solid var(--grid);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -63,6 +64,7 @@
   .striplabel button:hover{color:var(--txt)}
   .qrwrap{position:fixed;inset:0;background:rgba(32,33,36,.55);z-index:20;
           display:flex;align-items:center;justify-content:center;padding:20px}
+  .qrwrap[hidden]{display:none}
   .qrbox{background:#fff;border-radius:12px;padding:24px;max-width:380px;text-align:center;
          box-shadow:0 8px 28px rgba(0,0,0,.28)}
   .qrbox h2{font-size:16px;margin:0 0 6px}
