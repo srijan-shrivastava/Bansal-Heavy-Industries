@@ -17,7 +17,8 @@
   header{padding:10px 14px;border-bottom:1px solid var(--grid);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   header h1{font-size:15px;margin:0;font-weight:500}
   .who{font-size:12px;color:var(--muted)}
-  .who input{font:inherit;border:1px solid var(--grid);border-radius:4px;padding:3px 6px}
+  .who input,.who select{font:inherit;border:1px solid var(--grid);border-radius:4px;
+       padding:3px 6px;width:auto;height:auto;background:#fff}
   /* tab strip like Sheets (bottom bar) */
   .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--head);border-top:1px solid var(--grid);
           display:flex;align-items:center;gap:2px;padding:0 10px;height:44px;z-index:5}
@@ -80,7 +81,7 @@
     <path d="M50,50 L66,84 H34 Z" fill="#EF7F1F"/>
   </svg>
   <h1>Bansal Heavy Industries — Daily Entry</h1>
-  <label class="who">Filled by <input id="filledBy" placeholder="your name"></label>
+  <label class="who">Filled by <select id="filledBy"><option value="">select your name</option></select></label>
   <span class="who" id="today"></span>
 </header>
 
@@ -128,13 +129,14 @@
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
-                  
+const ENDPOINT =  'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+                 
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
 let CLIENTS = { "JPL": 450, "NALCO": 520 };
 let TRUCKS  = { "TRK-01": 12, "TRK-02": 12.4 };
 let DRIVERS = ["Ramesh","Suresh","Manoj"];
+let EMPLOYEES = [];
 const SHIFTS    = ["Day","Night"];
 const FM_TYPES  = ["Fuel","Repair","Maintenance"];
 const CASH_TYPE = ["Credit Received","Expense"];
@@ -350,7 +352,7 @@ document.getElementById("addFive").onclick = ()=>{ for(let i=0;i<5;i++) data[act
 document.getElementById("submit").onclick = async ()=>{
   const msg = document.getElementById("msg"), btn = document.getElementById("submit");
   const filledBy = document.getElementById("filledBy").value.trim();
-  if(!filledBy){ msg.className="msg err"; msg.textContent="Enter your name first."; return; }
+  if(!filledBy){ msg.className="msg err"; msg.textContent="Select your name first."; return; }
 
   const batchId = 'B' + new Date().toISOString().slice(2,10).replace(/-/g,'')
                 + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
@@ -422,6 +424,13 @@ function applyLists(L){
   if (L.clients && Object.keys(L.clients).length) CLIENTS = L.clients;
   if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
   if (L.drivers && L.drivers.length)              DRIVERS = L.drivers;
+  if (L.employees && L.employees.length){
+    EMPLOYEES = L.employees;
+    const sel = document.getElementById('filledBy');
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">select your name</option>' +
+      EMPLOYEES.map(e => `<option${e === keep ? ' selected' : ''}>${e}</option>`).join('');
+  }
   TRUCK_OPT = (L.costCentres && L.costCentres.length)
     ? L.costCentres
     : Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
