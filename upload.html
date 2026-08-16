@@ -40,6 +40,8 @@
   .shots{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px}
   .thumb{position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;background:var(--head)}
   .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb em{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);
+        color:#fff;font-size:10px;font-style:normal;text-align:center;padding:1px 0}
   .thumb button{position:absolute;top:2px;right:2px;width:22px;height:22px;border:none;
         border-radius:50%;background:rgba(0,0,0,.62);color:#fff;font-size:14px;line-height:22px;
         padding:0;cursor:pointer}
@@ -155,6 +157,7 @@ function render(){
           ${shots.map(s => `
             <div class="thumb">
               <img src="${s.dataUrl}" alt="">
+              <em>${Math.round((s.bytes || 0) / 1024)}KB</em>
               <button data-del="${s.id}" data-row="${t.row}" aria-label="Remove">×</button>
             </div>`).join('')}
           <button class="add" data-add="${t.row}"><span>+</span>Add photo</button>
@@ -210,7 +213,8 @@ document.addEventListener('change', async e => {
       (SHOTS[row] = SHOTS[row] || []).push({
         id: 's' + Math.random().toString(36).slice(2),
         name: f.name || 'photo.jpg',
-        dataUrl: shot.dataUrl, w: shot.w, h: shot.h
+        dataUrl: shot.dataUrl, bin: shot.bin,
+        w: shot.w, h: shot.h, bytes: shot.bytes
       });
     } catch(_){}
   }
@@ -218,36 +222,118 @@ document.addEventListener('change', async e => {
   render();
 });
 
-/* Downscale to max 1600px and re-encode as JPEG — a raw phone photo is 4-8MB,
-   this brings it to roughly 300-600KB with no meaningful loss for a slip or
-   a loaded tipper. Keeps uploads viable on a weak signal. */
-function shrink(file, max = 1600, quality = 0.82){
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onerror = reject;
-    fr.onload = () => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        let { width: w, height: h } = img;
-        if (w > max || h > max){
-          const k = Math.min(max / w, max / h);
-          w = Math.round(w * k); h = Math.round(h * k);
-        }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve({ dataUrl: c.toDataURL('image/jpeg', quality), w, h });
-      };
-      img.src = fr.result;
+/* ---------- adaptive JPEG compression ----------
+   Size is dominated by the JPEG encode; the PDF wrapper adds about 1KB a page.
+   Three things keep bytes down without visible loss:
+
+   1. Quality is searched, not fixed. A flat 0.82 wastes bytes on a plain
+      weighbridge slip and starves a detailed tipper shot. We binary-search
+      quality to hit a bits-per-pixel budget, so each photo gets what it needs.
+   2. Re-encoding is skipped when it would not help. If the camera file is
+      already smaller than our target and within the pixel limit, the original
+      bytes go straight into the PDF — no generational loss at all.
+   3. Long edge capped at 2000px. Enough to read a slip number; beyond that
+      you are paying for grain, not detail. Canvas also drops EXIF, which
+      saves a few KB per photo.
+*/
+
+const MAX_EDGE   = 2000;   // long edge in pixels
+const TARGET_BPP = 0.11;   // bits per pixel; ~200KB for a 2000x1500 photo
+const Q_MIN      = 0.62;   // never go below this, regardless of budget
+const Q_MAX      = 0.90;
+
+const readAsDataUrl = file => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onerror = rej;
+  fr.onload = () => res(fr.result);
+  fr.readAsDataURL(file);
+});
+
+const loadImage = src => new Promise((res, rej) => {
+  const img = new Image();
+  img.onerror = rej;
+  img.onload = () => res(img);
+  img.src = src;
+});
+
+const blobToBinary = blob => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onerror = rej;
+  fr.onload = () => {
+    const b = new Uint8Array(fr.result);
+    let out = '';
+    for (let i = 0; i < b.length; i += 0x8000){
+      out += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    }
+    res(out);
+  };
+  fr.readAsArrayBuffer(blob);
+});
+
+const encode = (canvas, q) =>
+  new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+
+async function shrink(file){
+  const dataUrl = await readAsDataUrl(file);
+  const img = await loadImage(dataUrl);
+
+  let w = img.naturalWidth, h = img.naturalHeight;
+  const needsResize = (w > MAX_EDGE || h > MAX_EDGE);
+  if (needsResize){
+    const k = MAX_EDGE / Math.max(w, h);
+    w = Math.round(w * k); h = Math.round(h * k);
+  }
+
+  const targetBytes = Math.round(w * h * TARGET_BPP);
+
+  // Already small enough and no resize needed? Use the camera's own bytes.
+  // Re-encoding here would only lose detail and often gain nothing.
+  if (!needsResize && file.size <= targetBytes * 1.15){
+    return {
+      bin: await blobToBinary(file),
+      dataUrl, w, h, bytes: file.size, reused: true
     };
-    fr.readAsDataURL(file);
-  });
+  }
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+
+  // Binary-search quality toward the byte budget. Four probes lands within a
+  // few percent, and stops early once close enough.
+  let lo = Q_MIN, hi = Q_MAX, best = null;
+  for (let i = 0; i < 4; i++){
+    const q = (lo + hi) / 2;
+    const blob = await encode(c, q);
+    if (!blob) break;
+    if (!best || (blob.size <= targetBytes && blob.size > best.size) ||
+        (best.size > targetBytes && blob.size < best.size)){
+      best = blob; best.q = q;
+    }
+    const ratio = blob.size / targetBytes;
+    if (ratio > 0.92 && ratio < 1.08) break;   // close enough
+    if (blob.size > targetBytes) hi = q; else lo = q;
+  }
+
+  if (!best) best = await encode(c, 0.8);
+
+  // If all that effort beat the original by less than 5%, keep the original.
+  if (!needsResize && file.size < best.size * 1.05){
+    return { bin: await blobToBinary(file), dataUrl, w, h,
+             bytes: file.size, reused: true };
+  }
+
+  return {
+    bin: await blobToBinary(best),
+    dataUrl: c.toDataURL('image/jpeg', 0.5),   // small preview only, not stored
+    w, h, bytes: best.size, reused: false
+  };
 }
 
 /* ---------- build one PDF per trip, upload each to Drive ---------- */
 
-const b64ToBin = b64 => atob(b64);
 const binToB64 = bin => {
   let out = '', chunk = 0x8000;
   for (let i = 0; i < bin.length; i += chunk){
@@ -259,7 +345,7 @@ const binToB64 = bin => {
 
 function pdfForTrip(trip, shots){
   const images = shots.map(s => ({
-    bin: b64ToBin(s.dataUrl.split(',')[1]),
+    bin: s.bin,
     w: s.w, h: s.h,
     caption: [trip.truck, 'Trip ' + (trip.tripNo || '?'),
               'Slip ' + (trip.slip || '-'), trip.date,
@@ -320,26 +406,34 @@ document.getElementById('send').onclick = async () => {
     }
   }
 
-  // no-cors gives no response, so confirm by re-reading the batch.
-  note.textContent = 'Confirming\u2026';
-  await new Promise(r => setTimeout(r, 2500));
-  try {
-    const res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
-    const saved = (res.trips || []).filter(t => t.photoUrl).length;
-    if (saved >= rows.length){
-      TRIPS = res.trips;
-      rows.forEach(r => delete SHOTS[r]);
-      note.className = 'note ok';
-      note.textContent = 'Saved ' + saved + ' PDFs to Drive.';
-      render();
-    } else {
-      note.className = 'note err';
-      note.textContent = saved + ' of ' + rows.length +
-        ' confirmed. Wait a moment and tap Upload again for the rest.';
-    }
-  } catch (err){
+  // no-cors gives no response, so confirm by re-reading the batch. Drive
+  // writes can lag a few seconds, so poll rather than checking once.
+  let saved = 0, res = null;
+  for (let attempt = 1; attempt <= 6; attempt++){
     note.className = 'note';
-    note.textContent = 'Uploaded. Could not confirm \u2014 check the sheet.';
+    note.textContent = 'Confirming\u2026 (' + attempt + '/6)';
+    await new Promise(r => setTimeout(r, attempt === 1 ? 3000 : 4000));
+    try {
+      res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
+      saved = (res.trips || []).filter(t => t.photoUrl).length;
+      if (saved >= rows.length) break;
+    } catch (err){ /* keep polling */ }
+  }
+
+  if (res && saved >= rows.length){
+    TRIPS = res.trips;
+    rows.forEach(r => delete SHOTS[r]);
+    note.className = 'note ok';
+    note.textContent = 'Saved ' + saved + ' PDFs to Drive.';
+    render();
+  } else if (res){
+    if (saved){ TRIPS = res.trips; render(); }
+    note.className = 'note err';
+    note.textContent = saved + ' of ' + rows.length +
+      ' saved. Tap Upload again for the rest.';
+  } else {
+    note.className = 'note';
+    note.textContent = 'Uploaded, but could not confirm \u2014 check the sheet.';
   }
   btn.disabled = false;
 };
