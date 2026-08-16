@@ -61,6 +61,14 @@
   .striplabel button{font:inherit;font-size:10px;letter-spacing:.5px;color:#8a8d91;
               border:1px solid var(--grid);border-radius:3px;background:#fff;padding:2px 8px;cursor:pointer}
   .striplabel button:hover{color:var(--txt)}
+  .qrwrap{position:fixed;inset:0;background:rgba(32,33,36,.55);z-index:20;
+          display:flex;align-items:center;justify-content:center;padding:20px}
+  .qrbox{background:#fff;border-radius:12px;padding:24px;max-width:380px;text-align:center;
+         box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  .qrbox h2{font-size:16px;margin:0 0 6px}
+  .qrbox p{font-size:13px;color:var(--muted);margin:0 0 16px;line-height:1.5}
+  .qrbox img{image-rendering:pixelated;width:220px;height:220px}
+  .qrlink{font-size:11px;color:var(--muted);word-break:break-all;margin:12px 0 16px}
   .del{color:#d93025;cursor:pointer;border:none;background:none;font-size:15px;line-height:1}
 </style>
 
@@ -100,13 +108,25 @@
   <button class="act primary" id="submit">Submit all three logs</button>
 </div>
 
+<div class="qrwrap" id="qrwrap" hidden>
+  <div class="qrbox">
+    <h2>Add photos from your phone</h2>
+    <p>Scan this with the phone camera to attach weighbridge slips and load
+       photos to the <b id="qrCount">0</b> trips just submitted.</p>
+    <div id="qrcode"></div>
+    <div class="qrlink" id="qrlink"></div>
+    <button class="act" id="qrclose">Done</button>
+  </div>
+</div>
+
 <div class="tabbar" role="tablist" id="tabs"></div>
+<script src="qr.min.js"></script>
 
 <script>
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
 
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
@@ -298,7 +318,9 @@ document.getElementById("submit").onclick = async ()=>{
   const filledBy = document.getElementById("filledBy").value.trim();
   if(!filledBy){ msg.className="msg err"; msg.textContent="Enter your name first."; return; }
 
-  const payload = {filledBy, submittedAt:new Date().toISOString(), blocks:{}};
+  const batchId = 'B' + new Date().toISOString().slice(2,10).replace(/-/g,'')
+                + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+  const payload = {filledBy, batchId, submittedAt:new Date().toISOString(), blocks:{}};
   let total = 0;
   for(const k of Object.keys(SHEETS)){
     const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
@@ -321,8 +343,10 @@ document.getElementById("submit").onclick = async ()=>{
       headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
     msg.className="msg ok"; msg.textContent = `Submitted ${total} rows.`;
     Object.keys(data).forEach(k=>{ data[k]=[blank(k),blank(k),blank(k)]; });
+    const tripCount = payload.blocks['Daily Trip Log'].length;
     render(); renderTabs();
     setTimeout(loadOverall, 2000);
+    if (tripCount) showQR(batchId, tripCount);
   }catch(err){
     msg.className="msg err"; msg.textContent="Send failed — check your connection and try again.";
   }
@@ -389,6 +413,26 @@ function renderOverall(){
     ? pairs.map(([l,v]) => `<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join('')
     : `<div class="kpi"><b>ALL-TIME TOTALS</b><span style="font-size:12px;color:#8a8d91">unavailable — check connection</span></div>`;
 }
+
+function showQR(batchId, tripCount){
+  const url = location.origin + location.pathname.replace(/[^/]*$/, '') +
+              'upload.html?b=' + encodeURIComponent(batchId);
+  const box = document.getElementById('qrcode');
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createImgTag(6, 8);
+  } catch(e) {
+    box.innerHTML = '<p style="font-size:12px;color:#d93025">QR unavailable — use the link below.</p>';
+  }
+  document.getElementById('qrCount').textContent = tripCount;
+  document.getElementById('qrlink').textContent = url;
+  document.getElementById('qrwrap').hidden = false;
+}
+
+document.getElementById('qrclose').onclick =
+  () => { document.getElementById('qrwrap').hidden = true; };
 
 render(); renderTabs();
 loadOverall();
