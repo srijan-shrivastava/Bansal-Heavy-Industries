@@ -1,0 +1,274 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BHI — Trip Photos</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#2E3032">
+<style>
+  :root{
+    --dark:#2E3032; --orange:#EF7F1F; --grid:#e2e3e3; --head:#f8f9fa;
+    --txt:#202124; --muted:#5f6368; --green:#0f9d58; --red:#d93025;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font:15px/1.45 -apple-system,Roboto,Arial,sans-serif;color:var(--txt);
+       background:#f1f3f4;padding-bottom:104px}
+  header{background:var(--dark);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;
+         position:sticky;top:0;z-index:10}
+  header h1{font-size:15px;margin:0;font-weight:600;flex:1}
+  header .sub{font-size:11px;opacity:.7;display:block;font-weight:400}
+  .progress{background:#fff;padding:10px 16px;border-bottom:1px solid var(--grid);
+            position:sticky;top:52px;z-index:9;font-size:13px;color:var(--muted)}
+  .progress b{color:var(--txt)}
+  .track{height:4px;background:var(--grid);border-radius:2px;margin-top:7px;overflow:hidden}
+  .track i{display:block;height:100%;background:var(--green);width:0;transition:width .25s}
+
+  .card{background:#fff;margin:10px;border-radius:10px;overflow:hidden;
+        box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .card.done{box-shadow:0 0 0 2px var(--green),0 1px 3px rgba(0,0,0,.12)}
+  .chead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--grid)}
+  .truck{background:var(--dark);color:#fff;font-weight:700;font-size:12px;
+         padding:4px 9px;border-radius:5px;white-space:nowrap}
+  .meta{flex:1;min-width:0}
+  .meta .l1{font-weight:600;font-size:14px}
+  .meta .l2{font-size:12px;color:var(--muted);margin-top:1px}
+  .tick{font-size:19px;color:var(--grid)}
+  .card.done .tick{color:var(--green)}
+
+  .shots{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px}
+  .thumb{position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;background:var(--head)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb button{position:absolute;top:2px;right:2px;width:22px;height:22px;border:none;
+        border-radius:50%;background:rgba(0,0,0,.62);color:#fff;font-size:14px;line-height:22px;
+        padding:0;cursor:pointer}
+  .add{width:76px;height:76px;border:2px dashed var(--grid);border-radius:8px;background:#fff;
+       color:var(--muted);font-size:11px;display:flex;flex-direction:column;align-items:center;
+       justify-content:center;gap:3px;cursor:pointer;font-family:inherit}
+  .add span{font-size:21px;line-height:1;color:var(--orange)}
+  .add:active{background:var(--head)}
+  input[type=file]{display:none}
+
+  .bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--grid);
+       padding:12px 16px calc(12px + env(safe-area-inset-bottom));z-index:10}
+  .bar button{width:100%;padding:14px;border:none;border-radius:9px;background:var(--green);
+       color:#fff;font:inherit;font-weight:700;font-size:16px;cursor:pointer}
+  .bar button:disabled{background:#c8cbcd}
+  .note{text-align:center;font-size:12px;color:var(--muted);margin-top:8px}
+  .note.err{color:var(--red)} .note.ok{color:var(--green)}
+
+  .state{padding:56px 28px;text-align:center;color:var(--muted)}
+  .state h2{font-size:16px;color:var(--txt);margin:0 0 8px}
+</style>
+
+<header>
+  <svg viewBox="0 0 100 100" width="26" height="26" aria-hidden="true">
+    <path d="M42,18 H58 L88,84 H72 L50,36 L28,84 H12 Z" fill="#fff"/>
+    <path d="M50,50 L66,84 H34 Z" fill="#EF7F1F"/>
+  </svg>
+  <h1>Trip Photos<span class="sub" id="sub">loading…</span></h1>
+</header>
+
+<div class="progress" id="prog" hidden>
+  <span><b id="pDone">0</b> of <b id="pTotal">0</b> trips have photos</span>
+  <span id="pShots" style="float:right"></span>
+  <div class="track"><i id="pBar"></i></div>
+</div>
+
+<div id="list"><div class="state">Loading your trips…</div></div>
+
+<div class="bar" hidden id="bar">
+  <button id="send" disabled>Upload photos</button>
+  <div class="note" id="note">Photos stay on your phone until you tap Upload.</div>
+</div>
+
+<script>
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+
+const BATCH = new URLSearchParams(location.search).get('b') || '';
+let TRIPS = [];                 // rows from the sheet
+const SHOTS = {};               // rowNumber -> [{id, dataUrl, name}]
+
+/* ---------- fetch the batch ---------- */
+function jsonp(params){
+  return new Promise((resolve, reject) => {
+    const cb = 'cb' + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    const done = () => { delete window[cb]; s.remove(); };
+    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 20000);
+    window[cb] = d => { clearTimeout(timer); done(); resolve(d); };
+    s.onerror = () => { clearTimeout(timer); done(); reject(new Error('failed')); };
+    s.src = ENDPOINT + '?' + params + '&callback=' + cb;
+    document.head.appendChild(s);
+  });
+}
+
+async function load(){
+  if (!BATCH){
+    document.getElementById('list').innerHTML =
+      `<div class="state"><h2>No batch selected</h2>
+       Scan the QR code shown on the computer after submitting the day's entries.</div>`;
+    document.getElementById('sub').textContent = '';
+    return;
+  }
+  try{
+    const res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
+    TRIPS = (res && res.trips) || [];
+    if (!TRIPS.length){
+      document.getElementById('list').innerHTML =
+        `<div class="state"><h2>No trips found</h2>
+         This batch has no Daily Trip Log entries, or the link has expired.</div>`;
+      document.getElementById('sub').textContent = BATCH;
+      return;
+    }
+    document.getElementById('sub').textContent =
+      TRIPS[0].date + ' · ' + (res.filledBy || '') + ' · ' + BATCH;
+    render();
+  }catch(err){
+    document.getElementById('list').innerHTML =
+      `<div class="state"><h2>Could not load</h2>
+       Check your internet connection and pull down to refresh.</div>`;
+    document.getElementById('sub').textContent = '';
+  }
+}
+
+/* ---------- render ---------- */
+function render(){
+  const list = document.getElementById('list');
+  list.innerHTML = TRIPS.map(t => {
+    const shots = SHOTS[t.row] || [];
+    return `
+      <div class="card ${shots.length ? 'done' : ''}" data-row="${t.row}">
+        <div class="chead">
+          <span class="truck">${esc(t.truck || '—')}</span>
+          <div class="meta">
+            <div class="l1">Trip ${esc(t.tripNo || '?')} · Slip ${esc(t.slip || '—')}</div>
+            <div class="l2">${esc(t.client || '')} · ${esc(t.shift || '')} · ${esc(t.tonnes || '')} t</div>
+          </div>
+          <span class="tick">${shots.length ? '✓' : '○'}</span>
+        </div>
+        <div class="shots">
+          ${shots.map(s => `
+            <div class="thumb">
+              <img src="${s.dataUrl}" alt="">
+              <button data-del="${s.id}" data-row="${t.row}" aria-label="Remove">×</button>
+            </div>`).join('')}
+          <button class="add" data-add="${t.row}"><span>+</span>Add photo</button>
+        </div>
+      </div>`;
+  }).join('') +
+  `<input type="file" id="picker" accept="image/*" capture="environment" multiple>`;
+
+  const done = TRIPS.filter(t => (SHOTS[t.row] || []).length).length;
+  const total = TRIPS.reduce((s, t) => s + (SHOTS[t.row] || []).length, 0);
+  document.getElementById('prog').hidden = false;
+  document.getElementById('bar').hidden = false;
+  document.getElementById('pDone').textContent = done;
+  document.getElementById('pTotal').textContent = TRIPS.length;
+  document.getElementById('pShots').textContent = total ? total + ' photo' + (total > 1 ? 's' : '') : '';
+  document.getElementById('pBar').style.width = (done / TRIPS.length * 100) + '%';
+  document.getElementById('send').disabled = !total;
+  document.getElementById('send').textContent =
+    total ? `Upload ${total} photo${total > 1 ? 's' : ''}` : 'Upload photos';
+}
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/* ---------- picking photos ---------- */
+let pickRow = null;
+
+document.addEventListener('click', e => {
+  const add = e.target.closest('[data-add]');
+  if (add){
+    pickRow = add.dataset.add;
+    const p = document.getElementById('picker');
+    p.value = '';
+    p.click();
+    return;
+  }
+  const del = e.target.closest('[data-del]');
+  if (del){
+    const row = del.dataset.row;
+    SHOTS[row] = (SHOTS[row] || []).filter(s => s.id !== del.dataset.del);
+    if (!SHOTS[row].length) delete SHOTS[row];
+    render();
+  }
+});
+
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'picker' || !pickRow) return;
+  const files = [...e.target.files];
+  const row = pickRow;
+  for (const f of files){
+    try {
+      const dataUrl = await shrink(f);
+      (SHOTS[row] = SHOTS[row] || []).push({
+        id: 's' + Math.random().toString(36).slice(2),
+        name: f.name || 'photo.jpg',
+        dataUrl
+      });
+    } catch(_){}
+  }
+  pickRow = null;
+  render();
+});
+
+/* Downscale to max 1600px and re-encode as JPEG — a raw phone photo is 4-8MB,
+   this brings it to roughly 300-600KB with no meaningful loss for a slip or
+   a loaded tipper. Keeps uploads viable on a weak signal. */
+function shrink(file, max = 1600, quality = 0.82){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = reject;
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w > max || h > max){
+          const k = Math.min(max / w, max / h);
+          w = Math.round(w * k); h = Math.round(h * k);
+        }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', quality));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* ---------- upload (storage wired up in the next step) ---------- */
+document.getElementById('send').onclick = async () => {
+  const btn = document.getElementById('send'), note = document.getElementById('note');
+
+  const payload = {
+    batchId: BATCH,
+    photos: Object.keys(SHOTS).map(row => ({
+      row: Number(row),
+      trip: TRIPS.find(t => String(t.row) === String(row)) || null,
+      files: SHOTS[row].map(s => ({ name: s.name, dataUrl: s.dataUrl }))
+    }))
+  };
+
+  const count = payload.photos.reduce((s, p) => s + p.files.length, 0);
+  const mb = (JSON.stringify(payload).length / 1048576).toFixed(1);
+
+  btn.disabled = true;
+  note.className = 'note';
+  note.textContent = 'Preparing ' + count + ' photos (' + mb + ' MB)…';
+
+  // TODO: POST `payload` to Apps Script, which writes each file to Drive and
+  // puts the resulting link in the matching Daily Trip Log row.
+  console.log('READY TO UPLOAD', payload);
+
+  setTimeout(() => {
+    note.className = 'note err';
+    note.textContent = 'Drive upload not connected yet — photos are held on this phone.';
+    btn.disabled = false;
+  }, 700);
+};
+
+load();
+</script>
