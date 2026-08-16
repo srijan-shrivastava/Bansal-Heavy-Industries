@@ -1,0 +1,274 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BHI Fleet — Dashboard</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#232326">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{
+    --ink:#232326; --accent:#F25505; --paper:#f6f6f4; --card:#fff;
+    --line:#e4e4e1; --muted:#78787c; --pos:#12855b; --neg:#c62828;
+  }
+  [hidden]{display:none!important}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font:14px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+
+  header{background:var(--ink);color:#fff;padding:16px 22px;
+         display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.2px}
+  header .tag{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;
+       color:var(--accent);font-weight:700}
+  header .right{margin-left:auto;display:flex;align-items:center;gap:12px;
+       font-size:11px;color:#b9b9bd}
+  header button{font:inherit;font-size:11px;font-weight:600;letter-spacing:.4px;
+       background:none;color:#fff;border:1px solid #4a4a4e;border-radius:4px;
+       padding:5px 11px;cursor:pointer}
+  header button:hover{border-color:var(--accent);color:var(--accent)}
+
+  main{padding:20px 22px 60px;max-width:1320px;margin:0 auto}
+
+  section{margin-bottom:26px}
+  .shead{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+  .shead h2{font-size:12px;text-transform:uppercase;letter-spacing:1.3px;
+       margin:0;font-weight:700}
+  .shead .rule{flex:1;height:1px;background:var(--line)}
+  .shead .src{font-size:10.5px;color:var(--muted);letter-spacing:.3px}
+
+  .grid{display:grid;gap:10px;
+        grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;
+       padding:13px 15px 14px}
+  .kpi b{display:block;font-size:9.5px;letter-spacing:.9px;color:var(--muted);
+       font-weight:700;text-transform:uppercase;margin-bottom:5px;line-height:1.35}
+  .kpi span{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;
+       letter-spacing:-.4px}
+  .kpi.lead{background:var(--ink);border-color:var(--ink)}
+  .kpi.lead b{color:#9a9a9f} .kpi.lead span{color:#fff}
+  .kpi.lead.acc span{color:var(--accent)}
+  .pos{color:var(--pos)} .neg{color:var(--neg)}
+
+  .charts{display:grid;gap:12px;grid-template-columns:2fr 1fr}
+  @media(max-width:900px){.charts{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:15px 17px}
+  .panel h3{font-size:10px;text-transform:uppercase;letter-spacing:1.1px;
+       margin:0 0 12px;color:var(--muted);font-weight:700}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .axis{font-size:9px;fill:var(--muted)}
+  .gline{stroke:var(--line);stroke-width:1}
+
+  .legend{display:flex;flex-direction:column;gap:7px;margin-top:12px;font-size:12px}
+  .legend div{display:flex;align-items:center;gap:8px}
+  .legend i{width:9px;height:9px;border-radius:2px;flex:none}
+  .legend em{margin-left:auto;font-style:normal;font-variant-numeric:tabular-nums;font-weight:600}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+  th{font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;
+     color:var(--muted);font-weight:700}
+  th:first-child,td:first-child{text-align:left}
+  tbody tr:hover{background:#faf9f7}
+  .scroll{overflow-x:auto}
+
+  .state{padding:70px 20px;text-align:center;color:var(--muted)}
+  .state b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
+  .stale{background:#fff4e5;border:1px solid #f0d9b5;border-radius:6px;
+         padding:9px 13px;font-size:12px;margin-bottom:18px}
+</style>
+
+<header>
+  <svg viewBox="0 0 114 91" width="30" height="24" aria-hidden="true">
+    <path d="M49.5,0 H64.5 L114,91 H91.2 L57,29.1 L22.8,91 H0 Z" fill="#fff"/>
+    <path d="M57,55 L76,91 H39 Z" fill="#F25505"/>
+  </svg>
+  <div>
+    <div class="tag">All-time</div>
+    <h1>Bansal Heavy Industries — Fleet Dashboard</h1>
+  </div>
+  <div class="right">
+    <span id="stamp"></span>
+    <button id="reload">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div class="stale" id="stale" hidden></div>
+  <div id="body"><div class="state"><b>Loading</b>Reading the workbook…</div></div>
+</main>
+
+<script>
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const inr = v => Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+
+function jsonp(params){
+  return new Promise((resolve, reject) => {
+    const cb = 'cb' + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    const done = () => { delete window[cb]; s.remove(); };
+    const t = setTimeout(() => { done(); reject(new Error('timeout')); }, 25000);
+    window[cb] = d => { clearTimeout(t); done(); resolve(d); };
+    s.onerror = () => { clearTimeout(t); done(); reject(new Error('failed')); };
+    s.src = ENDPOINT + '?' + params + '&callback=' + cb;
+    document.head.appendChild(s);
+  });
+}
+
+/* A value is negative if it carries a minus sign anywhere in the display text,
+   which covers "-1,200" and "(1,200)" and "-Rs 1,200" alike. */
+const signClass = (label, value) => {
+  if (!/profit|margin|balance/i.test(label)) return '';
+  return /-|\(/.test(value) ? 'neg' : 'pos';
+};
+
+function kpiCard(label, value, lead){
+  const cls = signClass(label, value);
+  return `<div class="kpi${lead ? ' lead' : ''}${lead && cls === 'pos' ? ' acc' : ''}">
+            <b>${esc(label)}</b><span class="${lead ? '' : cls}">${esc(value)}</span>
+          </div>`;
+}
+
+/* ---------- charts, hand-rolled SVG so the page carries no libraries ---------- */
+
+function lineChart(rows, key, colour, fmt){
+  if (rows.length < 2) return '<p class="axis">Not enough months yet.</p>';
+  const W = 640, H = 190, L = 52, R = 12, T = 12, B = 26;
+  const vals = rows.map(r => r[key]);
+  const lo = Math.min(0, ...vals), hi = Math.max(...vals, 1);
+  const x = i => L + i * (W - L - R) / (rows.length - 1);
+  const y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B);
+
+  const ticks = [lo, lo + (hi - lo) / 2, hi];
+  const grid = ticks.map(v =>
+    `<line class="gline" x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/>
+     <text class="axis" x="${L - 7}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`
+  ).join('');
+
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[key]).toFixed(1)}`).join(' ');
+  const area = line + ` L${x(rows.length - 1).toFixed(1)},${y(Math.max(lo,0)).toFixed(1)}`
+                    + ` L${x(0).toFixed(1)},${y(Math.max(lo,0)).toFixed(1)} Z`;
+
+  const dots = rows.map((r, i) =>
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(r[key]).toFixed(1)}" r="3" fill="${colour}">
+       <title>${esc(r.month)}: ${fmt(r[key])}</title></circle>`).join('');
+
+  // Only label every nth month so the axis never collides with itself.
+  const step = Math.ceil(rows.length / 8);
+  const labels = rows.map((r, i) => i % step ? '' :
+    `<text class="axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(r.month)}</text>`
+  ).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">
+    ${grid}
+    <path d="${area}" fill="${colour}" opacity=".08"/>
+    <path d="${line}" fill="none" stroke="${colour}" stroke-width="2"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}${labels}
+  </svg>`;
+}
+
+function donut(items){
+  if (!items.length) return '<p class="axis">No expenses recorded.</p>';
+  const total = items.reduce((s, i) => s + i[1], 0) || 1;
+  const cols = ['#F25505', '#232326', '#8a8a90', '#c9a227'];
+  const C = 100, R = 74, r = 46;
+  let a0 = -Math.PI / 2, paths = '';
+  items.forEach((it, i) => {
+    const a1 = a0 + it[1] / total * Math.PI * 2;
+    const big = (a1 - a0) > Math.PI ? 1 : 0;
+    const p = (rad, ang) => `${(C + rad * Math.cos(ang)).toFixed(2)},${(C + rad * Math.sin(ang)).toFixed(2)}`;
+    paths += `<path d="M${p(R, a0)} A${R},${R} 0 ${big} 1 ${p(R, a1)}
+                       L${p(r, a1)} A${r},${r} 0 ${big} 0 ${p(r, a0)} Z"
+                    fill="${cols[i % cols.length]}"><title>${esc(it[0])}: ${inr(it[1])}</title></path>`;
+    a0 = a1;
+  });
+  const legend = items.map((it, i) =>
+    `<div><i style="background:${cols[i % cols.length]}"></i>${esc(it[0])}
+       <em>${(it[1] / total * 100).toFixed(0)}%</em></div>`).join('');
+  return `<svg viewBox="0 0 200 200" role="img" style="max-width:200px;margin:0 auto">${paths}
+    <text x="100" y="96" text-anchor="middle" class="axis" style="font-size:9px">TOTAL</text>
+    <text x="100" y="112" text-anchor="middle" style="font-size:15px;font-weight:650"
+          fill="#232326">${inr(total)}</text></svg>
+    <div class="legend">${legend}</div>`;
+}
+
+function trendTable(rows){
+  const head = ['Month','Revenue','Diesel','Repair','Fixed','Cash','Net Profit','Tonnage'];
+  return `<div class="scroll"><table><thead><tr>${
+    head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
+    rows.slice().reverse().map(r => `<tr>
+      <td>${esc(r.month)}</td><td>${inr(r.revenue)}</td><td>${inr(r.diesel)}</td>
+      <td>${inr(r.repair)}</td><td>${inr(r.fixed)}</td><td>${inr(r.cash)}</td>
+      <td class="${r.profit < 0 ? 'neg' : 'pos'}">${inr(r.profit)}</td>
+      <td>${r.tonnage.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ---------- render ---------- */
+
+function render(d){
+  document.getElementById('stamp').textContent = 'As of ' + d.generatedAt;
+
+  let html = '';
+  d.blocks.forEach((b, bi) => {
+    if (!b.kpis.length) return;
+    html += `<section>
+      <div class="shead"><h2>${esc(b.title)}</h2><div class="rule"></div>
+        <span class="src">${esc(b.source)}</span></div>
+      <div class="grid">${b.kpis.map(([l, v]) => kpiCard(l, v, bi === 0)).join('')}</div>
+    </section>`;
+  });
+
+  if (d.trend.length){
+    html += `<section>
+      <div class="shead"><h2>Monthly Trend</h2><div class="rule"></div>
+        <span class="src">Monthly Summary (calc)</span></div>
+      <div class="charts">
+        <div class="panel"><h3>Net profit by month (Rs.)</h3>
+          ${lineChart(d.trend, 'profit', '#F25505', v => inr(v))}</div>
+        <div class="panel"><h3>Expense breakdown</h3>${donut(d.expense)}</div>
+      </div>
+      <div class="charts" style="margin-top:12px">
+        <div class="panel"><h3>Tonnage moved by month</h3>
+          ${lineChart(d.trend, 'tonnage', '#232326', v => v.toFixed(1))}</div>
+        <div class="panel"><h3>Month by month</h3>${trendTable(d.trend)}</div>
+      </div>
+    </section>`;
+  }
+
+  document.getElementById('body').innerHTML = html ||
+    '<div class="state"><b>No data yet</b>The workbook has no figures to show.</div>';
+}
+
+async function load(){
+  const stale = document.getElementById('stale');
+  const btn = document.getElementById('reload');
+  btn.disabled = true;
+  try {
+    const d = await jsonp('action=dash');
+    localStorage.setItem('bhi_dash', JSON.stringify(d));
+    stale.hidden = true;
+    render(d);
+  } catch (err){
+    const cached = localStorage.getItem('bhi_dash');
+    if (cached){
+      const d = JSON.parse(cached);
+      stale.hidden = false;
+      stale.textContent = 'Could not reach the workbook — showing the last figures loaded on this device (' +
+                          d.generatedAt + ').';
+      render(d);
+    } else {
+      document.getElementById('body').innerHTML =
+        '<div class="state"><b>Could not load</b>Check the connection, then press Refresh.</div>';
+    }
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('reload').onclick = load;
+load();
+</script>
