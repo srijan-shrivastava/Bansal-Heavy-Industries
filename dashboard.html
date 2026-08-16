@@ -3,6 +3,9 @@
 <title>BHI Fleet — Dashboard</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="dashboard.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#232326">
 <meta name="robots" content="noindex, nofollow">
 <style>
@@ -22,6 +25,17 @@
        color:var(--accent);font-weight:700}
   header .right{margin-left:auto;display:flex;align-items:center;gap:12px;
        font-size:11px;color:#b9b9bd}
+  header .dot{width:7px;height:7px;border-radius:50%;background:var(--pos);
+       flex:none;transition:background .3s}
+  header .dot.busy{background:var(--accent)}
+  header .dot.off{background:#7a3b3b}
+  @media(max-width:640px){
+    header{padding:12px 14px;gap:10px}
+    header h1{font-size:13px}
+    header .right{width:100%;margin-left:0;justify-content:space-between}
+    main{padding:14px 12px 50px}
+    .kpi span{font-size:19px}
+  }
   header button{font:inherit;font-size:11px;font-weight:600;letter-spacing:.4px;
        background:none;color:#fff;border:1px solid #4a4a4e;border-radius:4px;
        padding:5px 11px;cursor:pointer}
@@ -88,6 +102,7 @@
     <h1>Bansal Heavy Industries — Fleet Dashboard</h1>
   </div>
   <div class="right">
+    <span class="dot" id="dot" title="Live"></span>
     <span id="stamp"></span>
     <button id="reload">Refresh</button>
   </div>
@@ -211,9 +226,8 @@ function trendTable(rows){
 /* ---------- render ---------- */
 
 function render(d){
-  document.getElementById('stamp').textContent = 'As of ' + d.generatedAt;
-
-  let html = '';
+  let html = `<p style="font-size:11px;color:var(--muted);margin:0 0 14px">
+      Figures calculated by the workbook at ${esc(d.generatedAt)}.</p>`;
   d.blocks.forEach((b, bi) => {
     if (!b.kpis.length) return;
     html += `<section>
@@ -244,16 +258,62 @@ function render(d){
     '<div class="state"><b>No data yet</b>The workbook has no figures to show.</div>';
 }
 
+/* ---------- keeping it current ----------
+   A dashboard left open on a phone would otherwise freeze at whatever loaded
+   when it was opened. Three things keep it honest:
+     1. a poll every 5 minutes while the page is actually visible
+     2. an immediate refresh whenever the app is brought back to the foreground
+     3. a footer clock showing how old the figures on screen really are
+   Polling pauses when the page is hidden, so a backgrounded app costs nothing
+   in battery or Apps Script quota. */
+
+const POLL_MS = 5 * 60 * 1000;
+let lastLoaded = 0, timer = null;
+
+function setDot(state){
+  const d = document.getElementById('dot');
+  d.className = 'dot' + (state ? ' ' + state : '');
+  d.title = state === 'busy' ? 'Refreshing' : state === 'off' ? 'Offline' : 'Live';
+}
+
+function ageText(){
+  if (!lastLoaded) return '';
+  const m = Math.round((Date.now() - lastLoaded) / 60000);
+  return m < 1 ? 'just now' : m === 1 ? '1 min ago' : m + ' min ago';
+}
+
+function tickStamp(){
+  const el = document.getElementById('stamp');
+  if (lastLoaded) el.textContent = 'Updated ' + ageText();
+}
+setInterval(tickStamp, 30000);
+
+function schedule(){
+  clearTimeout(timer);
+  if (document.visibilityState === 'visible') timer = setTimeout(load, POLL_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') { clearTimeout(timer); return; }
+  // Back in the foreground: anything older than a minute is worth re-reading.
+  if (Date.now() - lastLoaded > 60000) load(); else schedule();
+});
+
 async function load(){
   const stale = document.getElementById('stale');
   const btn = document.getElementById('reload');
   btn.disabled = true;
+  setDot('busy');
   try {
     const d = await jsonp('action=dash');
     localStorage.setItem('bhi_dash', JSON.stringify(d));
+    lastLoaded = Date.now();
     stale.hidden = true;
+    setDot('');
     render(d);
+    tickStamp();
   } catch (err){
+    setDot('off');
     const cached = localStorage.getItem('bhi_dash');
     if (cached){
       const d = JSON.parse(cached);
@@ -267,6 +327,7 @@ async function load(){
     }
   }
   btn.disabled = false;
+  schedule();
 }
 
 document.getElementById('reload').onclick = load;
