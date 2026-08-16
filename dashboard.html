@@ -224,7 +224,7 @@ function trendTable(rows){
   const head = ['Month','Revenue','Diesel','Repair','Fixed','Cash','Net Profit','Tonnage'];
   return `<div class="scroll"><table><thead><tr>${
     head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
-    rows.slice().reverse().map(r => `<tr>
+    rows.map(r => `<tr>
       <td>${esc(r.month)}</td><td>${inr(r.revenue)}</td><td>${inr(r.diesel)}</td>
       <td>${inr(r.repair)}</td><td>${inr(r.fixed)}</td><td>${inr(r.cash)}</td>
       <td class="${r.profit < 0 ? 'neg' : 'pos'}">${inr(r.profit)}</td>
