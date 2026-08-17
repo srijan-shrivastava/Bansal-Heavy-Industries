@@ -18,27 +18,29 @@
   body{margin:0;background:var(--paper);color:var(--ink);
        font:14px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
 
-  header{background:var(--ink);color:#fff;padding:16px 22px;
-         display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.2px}
-  header .tag{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;
-       color:var(--accent);font-weight:700}
+  header{background:var(--card);color:var(--ink);padding:13px 22px;
+         border-bottom:1px solid var(--line);
+         display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header img.logo{height:30px;width:auto;display:block}
+  header h1{font-size:13px;font-weight:700;margin:0;letter-spacing:1.6px;
+       text-transform:uppercase;padding-left:16px;border-left:1px solid var(--line)}
   header .right{margin-left:auto;display:flex;align-items:center;gap:12px;
-       font-size:11px;color:#b9b9bd}
+       font-size:11px;color:var(--muted)}
   header .dot{width:7px;height:7px;border-radius:50%;background:var(--pos);
        flex:none;transition:background .3s}
   header .dot.busy{background:var(--accent)}
   header .dot.off{background:#7a3b3b}
   @media(max-width:640px){
-    header{padding:12px 14px;gap:10px}
-    header h1{font-size:13px}
+    header{padding:11px 14px;gap:12px}
+    header img.logo{height:24px}
+    header h1{font-size:11px;padding-left:12px}
     header .right{width:100%;margin-left:0;justify-content:space-between}
     main{padding:14px 12px 50px}
     .kpi span{font-size:19px}
   }
   header button{font:inherit;font-size:11px;font-weight:600;letter-spacing:.4px;
-       background:none;color:#fff;border:1px solid #4a4a4e;border-radius:4px;
-       padding:5px 11px;cursor:pointer}
+       background:#fff;color:var(--muted);border:1px solid var(--line);
+       border-radius:4px;padding:5px 11px;cursor:pointer}
   header button:hover{border-color:var(--accent);color:var(--accent)}
 
   main{padding:20px 22px 60px;max-width:1320px;margin:0 auto}
@@ -58,9 +60,6 @@
        font-weight:700;text-transform:uppercase;margin-bottom:5px;line-height:1.35}
   .kpi span{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;
        letter-spacing:-.4px}
-  .kpi.lead{background:var(--ink);border-color:var(--ink)}
-  .kpi.lead b{color:#9a9a9f} .kpi.lead span{color:#fff}
-  .kpi.lead.acc span{color:var(--accent)}
   .pos{color:var(--pos)} .neg{color:var(--neg)}
 
   .charts{display:grid;gap:12px;grid-template-columns:2fr 1fr}
@@ -96,14 +95,8 @@
 </style>
 
 <header>
-  <svg viewBox="0 0 114 91" width="30" height="24" aria-hidden="true">
-    <path d="M49.5,0 H64.5 L114,91 H91.2 L57,29.1 L22.8,91 H0 Z" fill="#fff"/>
-    <path d="M57,55 L76,91 H39 Z" fill="#F25505"/>
-  </svg>
-  <div>
-    <div class="tag">All-time</div>
-    <h1>Bansal Heavy Industries — Fleet Dashboard</h1>
-  </div>
+  <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+  <h1>Dashboard</h1>
   <div class="right">
     <span class="dot" id="dot" title="Live"></span>
     <span id="stamp"></span>
@@ -149,11 +142,9 @@ const signClass = (label, value) => {
   return /-|\(/.test(value) ? 'neg' : 'pos';
 };
 
-function kpiCard(label, value, lead){
-  const cls = signClass(label, value);
-  return `<div class="kpi${lead ? ' lead' : ''}${lead && cls === 'pos' ? ' acc' : ''}">
-            <b>${esc(label)}</b><span class="${lead ? '' : cls}">${esc(value)}</span>
-          </div>`;
+function kpiCard(label, value){
+  return `<div class="kpi"><b>${esc(label)}</b>
+            <span class="${signClass(label, value)}">${esc(value)}</span></div>`;
 }
 
 /* ---------- charts, hand-rolled SVG so the page carries no libraries ---------- */
@@ -238,12 +229,12 @@ const isValid = d => d && !d.error && Array.isArray(d.blocks);
 function render(d){
   let html = `<p style="font-size:11px;color:var(--muted);margin:0 0 14px">
       Figures calculated by the workbook at ${esc(d.generatedAt)}.</p>`;
-  d.blocks.forEach((b, bi) => {
+  d.blocks.forEach(b => {
     if (!b.kpis.length) return;
     html += `<section>
       <div class="shead"><h2>${esc(b.title)}</h2><div class="rule"></div>
         <span class="src">${esc(b.source)}</span></div>
-      <div class="grid">${b.kpis.map(([l, v]) => kpiCard(l, v, bi === 0)).join('')}</div>
+      <div class="grid">${b.kpis.map(([l, v]) => kpiCard(l, v)).join('')}</div>
     </section>`;
   });
 
