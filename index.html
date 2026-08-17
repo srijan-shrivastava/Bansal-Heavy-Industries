@@ -14,8 +14,16 @@
   [hidden]{display:none!important}
   *{box-sizing:border-box}
   body{margin:0;font:13px/1.4 Arial,Roboto,sans-serif;color:var(--txt);background:#fff}
-  header{padding:10px 14px;border-bottom:1px solid var(--grid);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  header h1{font-size:15px;margin:0;font-weight:500}
+  header{padding:10px 14px;border-bottom:1px solid var(--grid);
+       display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header img.logo{height:28px;width:auto;display:block}
+  header h1{font-size:12px;margin:0;font-weight:700;letter-spacing:1.6px;
+       text-transform:uppercase;padding-left:16px;border-left:1px solid var(--grid)}
+  @media(max-width:640px){
+    header{gap:12px}
+    header img.logo{height:22px}
+    header h1{font-size:10.5px;padding-left:12px}
+  }
   .who{font-size:12px;color:var(--muted)}
   .who input,.who select{font:inherit;border:1px solid var(--grid);border-radius:4px;
        padding:3px 6px;width:auto;height:auto;background:#fff}
@@ -77,11 +85,8 @@
 </style>
 
 <header>
-  <svg viewBox="0 0 114 91" width="28" height="22" aria-hidden="true">
-    <path d="M49.5,0 H64.5 L114,91 H91.2 L57,29.1 L22.8,91 H0 Z" fill="#232326"/>
-    <path d="M57,55 L76,91 H39 Z" fill="#F25505"/>
-  </svg>
-  <h1>Bansal Heavy Industries — Daily Entry</h1>
+  <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+  <h1>Data Entry</h1>
   <label class="who">Filled by <input id="filledBy" placeholder="your name"></label>
   <span class="who" id="today"></span>
 </header>
@@ -130,7 +135,7 @@
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
 
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
