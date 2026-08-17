@@ -1,8 +1,9 @@
 {
-  "name": "BHI Fleet Dashboard",
+  "id": "bhi-dashboard",
+  "name": "BHI — Fleet Dashboard",
   "short_name": "BHI Dash",
   "start_url": "./dashboard.html",
-  "scope": "./",
+  "scope": "./dashboard.html",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f6f6f4",
