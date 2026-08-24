@@ -274,7 +274,7 @@ const isValid = d => d && !d.error && Array.isArray(d.blocks);
 
 function render(d){
   let html = `<p style="font-size:11px;color:var(--muted);margin:0 0 14px">
-      Figures calculated by the workbook at ${esc(d.generatedAt)}.</p>`;
+      Workbook figures as of ${esc(d.generatedAt)}.</p>`;
   d.blocks.forEach(b => {
     if (!b.kpis.length) return;
     html += `<section>
@@ -360,7 +360,7 @@ document.getElementById('lockGo').onclick = async () => {
   if (!code) return;
   m.className = ''; m.textContent = 'Checking\u2026';
   ACCESS_CODE = code;
-  await load();
+  await load(false);
   if (AUTH_ERROR){
     lock(AUTH_ERROR);            // load() has already cleared the code
   } else if (!lastLoaded){
@@ -396,22 +396,29 @@ setInterval(tickStamp, 30000);
 
 function schedule(){
   clearTimeout(timer);
-  if (document.visibilityState === 'visible') timer = setTimeout(load, POLL_MS);
+  if (document.visibilityState === 'visible') {
+    timer = setTimeout(() => load(false), POLL_MS);
+  }
 }
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') { clearTimeout(timer); return; }
   // Back in the foreground: anything older than a minute is worth re-reading.
-  if (Date.now() - lastLoaded > 60000) load(); else schedule();
+  if (Date.now() - lastLoaded > 60000) load(false); else schedule();
 });
 
-async function load(){
+async function load(force){
   const stale = document.getElementById('stale');
   const btn = document.getElementById('reload');
+  const st = document.getElementById('stamp');
   btn.disabled = true;
   setDot('busy');
+  // Say what is happening. A colour change alone is easy to miss, and gives
+  // no clue whether anything actually came back.
+  st.textContent = force ? 'Recalculating\u2026' : 'Refreshing\u2026';
+  btn.textContent = 'Working\u2026';
   try {
-    const d = await jsonp('action=dash');
+    const d = await jsonp('action=dash' + (force ? '&fresh=1' : ''));
 
     if (d && d.authError){
       // Enforced here so every path locks: first load, the Refresh button and
@@ -448,7 +455,7 @@ async function load(){
     stale.hidden = true;
     setDot('');
     render(d);
-    tickStamp();
+    st.textContent = 'Updated just now';
   } catch (err){
     setDot('off');
     let cached = null;
@@ -474,14 +481,16 @@ async function load(){
     }
   }
   btn.disabled = false;
+  btn.textContent = 'Refresh';
   schedule();
 }
 
-document.getElementById('reload').onclick = load;
+// The button forces a server-side rebuild; the timed poll does not.
+document.getElementById('reload').onclick = () => load(true);
 
 (async () => {
   if (!ACCESS_CODE){ lock('missing'); return; }
-  await load();
+  await load(false);
   if (AUTH_ERROR){
     lock(AUTH_ERROR);            // load() has already cleared the code
   } else if (!lastLoaded){
