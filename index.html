@@ -432,31 +432,77 @@ document.getElementById("submit").onclick = async ()=>{
   }
   if(!total){ msg.className="msg err"; msg.textContent="Nothing to submit yet."; return; }
 
-  btn.disabled = true; msg.className="msg"; msg.textContent="Sending…";
-  try{
+  btn.disabled = true; msg.className="msg"; msg.textContent="Sending\u2026";
+
+  /* A no-cors POST cannot read its own reply, so "Submitted" used to be a
+     guess. It was wrong in two cases that matter: a revoked code, where the
+     server refuses and writes nothing, and a dropped connection. Both looked
+     like success.
+
+     So: send, then ASK. action=check counts what the batch actually wrote,
+     and answers authError if the code is no longer valid. Only a confirmed
+     row count clears the grid — anything else keeps the typed rows so they
+     can be sent again. */
+  try {
     await fetch(ENDPOINT,{method:"POST",mode:"no-cors",
       headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
-    msg.className="msg ok"; msg.textContent = `Submitted ${total} rows.`;
+  } catch(err){
+    msg.className="msg err";
+    msg.textContent="Send failed — nothing was saved. Check your connection and try again.";
+    btn.disabled = false;
+    return;
+  }
+
+  msg.className = "msg"; msg.textContent = "Saving\u2026";
+
+  let landed = null;
+  for (let attempt = 1; attempt <= 5; attempt++){
+    await new Promise(r => setTimeout(r, attempt === 1 ? 1800 : 2500));
+    let res;
+    try {
+      res = await jsonp('action=check&b=' + encodeURIComponent(batchId));
+    } catch(e){ continue; }                       // network blip: keep asking
+
+    if (res && res.authError){
+      // Refused. Nothing was written, and the page has no business staying open.
+      AUTH_ERROR = res.authError;
+      localStorage.removeItem('bhi_code');
+      localStorage.removeItem('bhi_payload');
+      ACCESS_CODE = '';
+      OVERALL = {};
+      lock(AUTH_ERROR);
+      btn.disabled = false;
+      return;
+    }
+    if (res && res.rows >= total){ landed = res; break; }
+  }
+
+  if (landed){
+    msg.className="msg ok"; msg.textContent = `Saved ${landed.rows} rows.`;
     Object.keys(data).forEach(k=>{ data[k]=[blank(k),blank(k),blank(k)]; });
     const tripCount = payload.blocks['Daily Trip Log'].length;
     render(); renderTabs();
-    setTimeout(loadOverall, 2000);
+    setTimeout(loadOverall, 1500);
     if (tripCount) showQR(batchId, tripCount);
-  }catch(err){
-    msg.className="msg err"; msg.textContent="Send failed — check your connection and try again.";
+  } else {
+    // Rows are deliberately NOT cleared — they may not have been saved.
+    msg.className="msg err";
+    msg.textContent="Could not confirm the save. Your rows are still here — "
+                  + "check the sheet before submitting again.";
   }
   btn.disabled = false;
 };
 
 /* ---- all-time totals, read from the sheet's own KPI cells ---- */
-function jsonp(){
+function jsonp(params){
   return new Promise((resolve, reject) => {
     const cb = 'cb' + Math.random().toString(36).slice(2);
     const s = document.createElement('script');
     const done = () => { delete window[cb]; s.remove(); };
-    window[cb] = d => { done(); resolve(d); };
-    s.onerror = () => { done(); reject(new Error('fetch failed')); };
-    s.src = ENDPOINT + '?callback=' + cb +
+    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 20000);
+    window[cb] = d => { clearTimeout(timer); done(); resolve(d); };
+    s.onerror = () => { clearTimeout(timer); done(); reject(new Error('fetch failed')); };
+    s.src = ENDPOINT + '?callback=' + cb + (params ? '&' + params : '') +
             (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
     document.head.appendChild(s);
   });
