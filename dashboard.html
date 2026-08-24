@@ -1,8 +1,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BHI — Fleet Dashboard</title>
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="dash-favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="dash-icon-192.png">
 <link rel="manifest" href="dashboard.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -309,9 +309,10 @@ let ACCESS_CODE = localStorage.getItem('bhi_dash_code') || '';
 let AUTH_ERROR = '';
 
 const LOCK_TEXT = {
-  revoked:     'That code has been switched off. Contact the office.',
+  revoked:     'Your access has been withdrawn. Contact the office if you '
+             + 'think this is a mistake.',
   unknown:     'That code was not recognised.',
-  wrongrole:   'That code does not open the dashboard.',
+  wrongrole:   'Your access no longer covers the dashboard.',
   missing:     'This dashboard is restricted.',
   notab:       'Access list not found in the workbook.',
   unavailable: 'Cannot reach the workbook, so your code cannot be checked.',
@@ -343,8 +344,7 @@ document.getElementById('lockGo').onclick = async () => {
   ACCESS_CODE = code;
   await load();
   if (AUTH_ERROR){
-    ACCESS_CODE = '';
-    lock(AUTH_ERROR);
+    lock(AUTH_ERROR);            // load() has already cleared the code
   } else if (!lastLoaded){
     ACCESS_CODE = '';
     lock('offline');
@@ -396,9 +396,16 @@ async function load(){
     const d = await jsonp('action=dash');
 
     if (d && d.authError){
+      // Enforced here so every path locks: first load, the Refresh button and
+      // the five-minute poll. Revoking, or narrowing a role to Data entry,
+      // shuts an already-open dashboard on its next contact with the sheet.
       AUTH_ERROR = d.authError;
-      localStorage.removeItem('bhi_dash');   // never keep figures we cannot show
+      localStorage.removeItem('bhi_dash');        // never keep figures we cannot show
+      localStorage.removeItem('bhi_dash_code');
+      ACCESS_CODE = '';
+      lastLoaded = 0;
       btn.disabled = false;
+      lock(AUTH_ERROR);
       return;
     }
     AUTH_ERROR = '';
@@ -458,9 +465,7 @@ document.getElementById('reload').onclick = load;
   if (!ACCESS_CODE){ lock('missing'); return; }
   await load();
   if (AUTH_ERROR){
-    localStorage.removeItem('bhi_dash_code');
-    ACCESS_CODE = '';
-    lock(AUTH_ERROR);
+    lock(AUTH_ERROR);            // load() has already cleared the code
   } else if (!lastLoaded){
     lock('offline');          // could not verify: locked, per fail-closed rule
   }
