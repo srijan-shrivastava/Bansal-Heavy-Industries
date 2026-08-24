@@ -93,6 +93,19 @@
   .qrbox img{image-rendering:pixelated;width:220px;height:220px}
   .qrlink{font-size:11px;color:var(--muted);word-break:break-all;margin:12px 0 16px}
   .del{color:#d93025;cursor:pointer;border:none;background:none;font-size:15px;line-height:1}
+  .lockwrap{position:fixed;inset:0;background:#fff;z-index:40;
+       display:flex;align-items:center;justify-content:center;padding:24px}
+  .lockwrap[hidden]{display:none}
+  .lockbox{max-width:320px;width:100%;text-align:center}
+  .lockbox .logo{height:30px;margin:0 auto 26px;display:block}
+  .lockbox h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  .lockbox p{font-size:12px;color:var(--muted);margin:0 0 18px;min-height:32px}
+  .lockbox p.err{color:#d93025}
+  .lockbox input{width:100%;height:44px;font-size:20px;text-align:center;
+       letter-spacing:6px;border:1px solid var(--grid);border-radius:6px;
+       margin-bottom:12px;background:#fff}
+  .lockbox input:focus{border-color:var(--accent);box-shadow:none}
+  .lockbox button{width:100%;padding:11px}
 </style>
 
 <header>
@@ -144,6 +157,17 @@
   </div>
 </div>
 
+<div class="lockwrap" id="lockwrap" hidden>
+  <div class="lockbox">
+    <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+    <h2>Enter your access code</h2>
+    <p id="lockMsg">Ask the office if you do not have one.</p>
+    <input id="lockCode" type="text" inputmode="numeric" autocomplete="off"
+           maxlength="12" placeholder="••••">
+    <button class="act primary" id="lockGo">Unlock</button>
+  </div>
+</div>
+
 <div class="tabbar" role="tablist" id="tabs"></div>
 <script src="qr.min.js"></script>
 
@@ -151,8 +175,8 @@
 /* ============================================================
    1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
    ============================================================ */
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
-                 
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbz8R5DL0CE9uGPiap5h4wKff5-qeUvbIVq8n0Ob0PjaqYohfXx2z08pZeLs8oDx_Llf0A/exec';
+
 /* These are only a fallback for the first load or when offline. The live
    values come from 'Settings & Fixed Costs' via getLists(). */
 let CLIENTS = { "JPL": 450, "NALCO": 520 };
@@ -389,7 +413,8 @@ document.getElementById("submit").onclick = async ()=>{
 
   const batchId = 'B' + new Date().toISOString().slice(2,10).replace(/-/g,'')
                 + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
-  const payload = {filledBy, batchId, submittedAt:new Date().toISOString(), blocks:{}};
+  const payload = {filledBy, batchId, code: ACCESS_CODE,
+                   submittedAt:new Date().toISOString(), blocks:{}};
   let total = 0;
   for(const k of Object.keys(SHEETS)){
     const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
@@ -431,7 +456,8 @@ function jsonp(){
     const done = () => { delete window[cb]; s.remove(); };
     window[cb] = d => { done(); resolve(d); };
     s.onerror = () => { done(); reject(new Error('fetch failed')); };
-    s.src = ENDPOINT + '?callback=' + cb;
+    s.src = ENDPOINT + '?callback=' + cb +
+            (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
     document.head.appendChild(s);
   });
 }
@@ -439,11 +465,83 @@ function jsonp(){
 let OVERALL = {};
 let SYNC_FAILED = false;
 
+/* ---------- access ----------
+   The code is NOT held in this file. Every load asks Apps Script to check it
+   against the 'Access' tab, so revoking someone is a single cell edit in the
+   sheet — no commit, no re-upload, no waiting for browser caches.
+
+   FAIL CLOSED. If the sheet cannot be reached the page stays locked and says
+   so. There is no cached permission and no offline fallback: the Status
+   column is the only thing that grants access. The code is remembered per
+   device so it is typed once, but remembering it is not the same as being
+   allowed in — it is re-checked every time. */
+let ACCESS_CODE = localStorage.getItem('bhi_code') || '';
+
+const LOCK_TEXT = {
+  revoked:     'That code has been switched off. Contact the office.',
+  unknown:     'That code was not recognised.',
+  missing:     'Enter your access code to continue.',
+  notab:       'Access list not found in the workbook. Contact the office.',
+  unavailable: 'Cannot reach the workbook, so your code cannot be checked. '
+             + 'Try again in a minute.',
+  offline:     'No connection to the workbook. Your code cannot be checked '
+             + 'right now, so entry is not available. Try again shortly.'
+};
+
+function lock(reason){
+  const w = document.getElementById('lockwrap');
+  const m = document.getElementById('lockMsg');
+  const i = document.getElementById('lockCode');
+  if (reason){
+    m.textContent = LOCK_TEXT[reason] || String(reason);
+    m.className = (reason === 'missing') ? '' : 'err';
+  }
+  w.hidden = false;
+  // Nothing behind the lock should be readable while locked out.
+  document.getElementById('overall').innerHTML = '';
+  document.getElementById('pane').innerHTML = '';
+  i.value = '';
+  setTimeout(() => i.focus(), 50);
+}
+
+document.getElementById('lockGo').onclick = async () => {
+  const i = document.getElementById('lockCode');
+  const m = document.getElementById('lockMsg');
+  const code = i.value.trim();
+  if (!code) return;
+  m.className = ''; m.textContent = 'Checking\u2026';
+  ACCESS_CODE = code;
+  await loadOverall();
+  if (AUTH_ERROR || SYNC_FAILED){
+    ACCESS_CODE = '';
+    lock(AUTH_ERROR || 'offline');
+  } else {
+    localStorage.setItem('bhi_code', code);
+    document.getElementById('lockwrap').hidden = true;
+    render(); renderTabs();
+  }
+};
+
+document.getElementById('lockCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('lockGo').click();
+});
+
+let AUTH_ERROR = '';
+
 async function loadOverall(){
   const lbl = document.getElementById('overallLabel');
   lbl.textContent = 'Refreshing\u2026';
   try {
     const res = await jsonp();
+
+    if (res && res.authError){
+      AUTH_ERROR = res.authError;
+      SYNC_FAILED = false;
+      lbl.textContent = 'Locked';
+      return;
+    }
+    AUTH_ERROR = '';
+
     OVERALL = res.summary || res;          // tolerate the older payload shape
     if (res.lists) applyLists(res.lists);
     try { localStorage.setItem('bhi_payload', JSON.stringify(res)); } catch(_){}
@@ -476,15 +574,9 @@ function applyLists(L){
   }
 }
 
-// paint the previous figures and lists instantly, then refresh in the background
-try {
-  const cached = localStorage.getItem('bhi_payload');
-  if (cached) {
-    const res = JSON.parse(cached);
-    OVERALL = res.summary || res;
-    if (res.lists) applyLists(res.lists);
-  }
-} catch(_){}
+/* No cached payload is loaded before the code is checked. Showing last-known
+   figures to someone who has not been verified would leak exactly the data
+   the lock exists to protect. */
 
 document.getElementById('rangeSel').onchange = renderOverall;
 /* Refresh re-reads the sheet: dropdown lists (clients, trucks, drivers) and
@@ -538,7 +630,8 @@ function renderOverall(){
 
 function showQR(batchId, tripCount){
   const url = location.origin + location.pathname.replace(/[^/]*$/, '') +
-              'upload.html?b=' + encodeURIComponent(batchId);
+              'upload.html?b=' + encodeURIComponent(batchId) +
+              (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
   const box = document.getElementById('qrcode');
   try {
     const qr = qrcode(0, 'M');
@@ -557,5 +650,20 @@ document.getElementById('qrclose').onclick =
   () => { document.getElementById('qrwrap').hidden = true; };
 
 render(); renderTabs();
-loadOverall();
+
+(async () => {
+  if (!ACCESS_CODE){ lock('missing'); return; }
+  await loadOverall();
+
+  if (AUTH_ERROR){
+    // A definite refusal — forget the code so it is not retried silently.
+    localStorage.removeItem('bhi_code');
+    ACCESS_CODE = '';
+    lock(AUTH_ERROR);
+  } else if (SYNC_FAILED){
+    // Could not verify. Keep the stored code (it may well be valid) but do
+    // not open the form: unverified means locked.
+    lock('offline');
+  }
+})();
 </script>
