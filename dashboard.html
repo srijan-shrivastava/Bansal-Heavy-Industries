@@ -92,6 +92,22 @@
   .state b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
   .stale{background:#fff4e5;border:1px solid #f0d9b5;border-radius:6px;
          padding:9px 13px;font-size:12px;margin-bottom:18px}
+
+  .lockwrap{position:fixed;inset:0;background:var(--paper);z-index:60;
+       display:flex;align-items:center;justify-content:center;padding:24px}
+  .lockwrap[hidden]{display:none}
+  .lockbox{max-width:320px;width:100%;text-align:center}
+  .lockbox .logo{height:30px;margin:0 auto 26px;display:block}
+  .lockbox h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  .lockbox p{font-size:12px;color:var(--muted);margin:0 0 18px;min-height:34px}
+  .lockbox p.err{color:var(--neg)}
+  .lockbox input{width:100%;height:44px;font-size:20px;text-align:center;
+       letter-spacing:6px;border:1px solid var(--line);border-radius:6px;
+       margin-bottom:12px;background:#fff;font-family:inherit}
+  .lockbox input:focus{outline:none;border-color:var(--accent)}
+  .lockbox button{width:100%;padding:11px;font:inherit;font-weight:700;
+       background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer}
+  .lockbox button:disabled{opacity:.5;cursor:default}
 </style>
 
 <header>
@@ -103,6 +119,17 @@
     <button id="reload">Refresh</button>
   </div>
 </header>
+
+<div class="lockwrap" id="lockwrap" hidden>
+  <div class="lockbox">
+    <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+    <h2>Enter your access code</h2>
+    <p id="lockMsg">This dashboard is restricted.</p>
+    <input id="lockCode" type="text" inputmode="numeric" autocomplete="off"
+           maxlength="12" placeholder="••••">
+    <button id="lockGo">Unlock</button>
+  </div>
+</div>
 
 <main>
   <div class="stale" id="stale" hidden></div>
@@ -130,7 +157,8 @@ function jsonp(params){
     const t = setTimeout(() => { done(); reject(new Error('timeout')); }, 25000);
     window[cb] = d => { clearTimeout(t); done(); resolve(d); };
     s.onerror = () => { clearTimeout(t); done(); reject(new Error('failed')); };
-    s.src = ENDPOINT + '?' + params + '&callback=' + cb;
+    s.src = ENDPOINT + '?' + params + '&callback=' + cb +
+            (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
     document.head.appendChild(s);
   });
 }
@@ -271,6 +299,65 @@ function render(d){
 const POLL_MS = 5 * 60 * 1000;
 let lastLoaded = 0, timer = null;
 
+/* ---------- access ----------
+   Same roster as the entry form, but this page requires a code whose Role is
+   'Dashboard' or 'Overall'. An entry-only code is refused, so the person
+   filling in trips cannot read revenue and profit here.
+
+   Fail closed: if the workbook cannot be reached the page stays locked. */
+let ACCESS_CODE = localStorage.getItem('bhi_dash_code') || '';
+let AUTH_ERROR = '';
+
+const LOCK_TEXT = {
+  revoked:     'That code has been switched off. Contact the office.',
+  unknown:     'That code was not recognised.',
+  wrongrole:   'That code does not open the dashboard.',
+  missing:     'This dashboard is restricted.',
+  notab:       'Access list not found in the workbook.',
+  unavailable: 'Cannot reach the workbook, so your code cannot be checked.',
+  offline:     'No connection to the workbook, so your code cannot be checked. '
+             + 'Try again shortly.'
+};
+
+function lock(reason){
+  const w = document.getElementById('lockwrap');
+  const m = document.getElementById('lockMsg');
+  if (reason){
+    m.textContent = LOCK_TEXT[reason] || String(reason);
+    m.className = (reason === 'missing') ? '' : 'err';
+  }
+  w.hidden = false;
+  document.getElementById('body').innerHTML = '';   // nothing readable behind it
+  clearTimeout(timer);
+  const i = document.getElementById('lockCode');
+  i.value = '';
+  setTimeout(() => i.focus(), 50);
+}
+
+document.getElementById('lockGo').onclick = async () => {
+  const i = document.getElementById('lockCode');
+  const m = document.getElementById('lockMsg');
+  const code = i.value.trim();
+  if (!code) return;
+  m.className = ''; m.textContent = 'Checking\u2026';
+  ACCESS_CODE = code;
+  await load();
+  if (AUTH_ERROR){
+    ACCESS_CODE = '';
+    lock(AUTH_ERROR);
+  } else if (!lastLoaded){
+    ACCESS_CODE = '';
+    lock('offline');
+  } else {
+    localStorage.setItem('bhi_dash_code', code);
+    document.getElementById('lockwrap').hidden = true;
+  }
+};
+
+document.getElementById('lockCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('lockGo').click();
+});
+
 function setDot(state){
   const d = document.getElementById('dot');
   d.className = 'dot' + (state ? ' ' + state : '');
@@ -307,6 +394,14 @@ async function load(){
   setDot('busy');
   try {
     const d = await jsonp('action=dash');
+
+    if (d && d.authError){
+      AUTH_ERROR = d.authError;
+      localStorage.removeItem('bhi_dash');   // never keep figures we cannot show
+      btn.disabled = false;
+      return;
+    }
+    AUTH_ERROR = '';
 
     // The endpoint answers even when it cannot build a dashboard — for
     // example if Dashboard.gs is missing from the Apps Script project, or the
@@ -358,5 +453,16 @@ async function load(){
 }
 
 document.getElementById('reload').onclick = load;
-load();
+
+(async () => {
+  if (!ACCESS_CODE){ lock('missing'); return; }
+  await load();
+  if (AUTH_ERROR){
+    localStorage.removeItem('bhi_dash_code');
+    ACCESS_CODE = '';
+    lock(AUTH_ERROR);
+  } else if (!lastLoaded){
+    lock('offline');          // could not verify: locked, per fail-closed rule
+  }
+})();
 </script>
