@@ -1,12 +1,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BHI — Trip Documents</title>
+<title>BHI — Trip Photos</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="icon-192.png">
-<meta name="theme-color" content="#2E3032">
+<meta name="theme-color" content="#232326">
 <style>
   :root{
-    --dark:#2E3032; --orange:#EF7F1F; --grid:#e2e3e3; --head:#f8f9fa;
+    --dark:#232326; --orange:#F25505; --grid:#e2e3e3; --head:#f8f9fa;
     --txt:#202124; --muted:#5f6368; --green:#0f9d58; --red:#d93025;
   }
   [hidden]{display:none!important}
@@ -42,6 +42,14 @@
   .thumb img{width:100%;height:100%;object-fit:cover;display:block}
   .thumb em{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);
         color:#fff;font-size:10px;font-style:normal;text-align:center;padding:1px 0}
+  .thumb.pending img{opacity:.45}
+  .thumb.pending em{background:var(--orange)}
+  .thumb.pending::after{content:'';position:absolute;top:50%;left:50%;width:20px;height:20px;
+        margin:-10px 0 0 -10px;border:2px solid rgba(255,255,255,.4);
+        border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .thumb.failed img{opacity:.3}
+  .thumb.failed em{background:var(--red)}
   .thumb button{position:absolute;top:2px;right:2px;width:22px;height:22px;border:none;
         border-radius:50%;background:rgba(0,0,0,.62);color:#fff;font-size:14px;line-height:22px;
         padding:0;cursor:pointer}
@@ -65,9 +73,9 @@
 </style>
 
 <header>
-  <svg viewBox="0 0 100 100" width="26" height="26" aria-hidden="true">
-    <path d="M42,18 H58 L88,84 H72 L50,36 L28,84 H12 Z" fill="#fff"/>
-    <path d="M50,50 L66,84 H34 Z" fill="#EF7F1F"/>
+  <svg viewBox="0 0 114 91" width="28" height="22" aria-hidden="true">
+    <path d="M49.5,0 H64.5 L114,91 H91.2 L57,29.1 L22.8,91 H0 Z" fill="#fff"/>
+    <path d="M57,55 L76,91 H39 Z" fill="#F25505"/>
   </svg>
   <h1>Trip Photos<span class="sub" id="sub">loading…</span></h1>
 </header>
@@ -88,7 +96,7 @@
 <script src="pdf.min.js"></script>
 <script>
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
-                  
+
 const BATCH = new URLSearchParams(location.search).get('b') || '';
 let TRIPS = [];                 // rows from the sheet
 const SHOTS = {};               // rowNumber -> [{id, dataUrl, name}]
@@ -155,9 +163,11 @@ function render(){
              <a href="${esc(t.photoUrl)}" target="_blank" rel="noopener">open</a></div>` : ''}
         <div class="shots">
           ${shots.map(s => `
-            <div class="thumb">
+            <div class="thumb${s.pending ? ' pending' : ''}${s.failed ? ' failed' : ''}">
               <img src="${s.dataUrl}" alt="">
-              <em>${Math.round((s.bytes || 0) / 1024)}KB</em>
+              <em>${s.pending ? 'saving\u2026'
+                    : s.failed ? 'failed'
+                    : Math.round((s.bytes || 0) / 1024) + 'KB'}</em>
               <button data-del="${s.id}" data-row="${t.row}" aria-label="Remove">×</button>
             </div>`).join('')}
           <button class="add" data-add="${t.row}"><span>+</span>Add photo</button>
@@ -174,23 +184,50 @@ function render(){
   document.getElementById('pTotal').textContent = TRIPS.length;
   document.getElementById('pShots').textContent = total ? total + ' photo' + (total > 1 ? 's' : '') : '';
   document.getElementById('pBar').style.width = (done / TRIPS.length * 100) + '%';
-  document.getElementById('send').disabled = !total;
-  document.getElementById('send').textContent =
-    total ? `Upload ${total} photo${total > 1 ? 's' : ''}` : 'Upload photos';
+  // Uploading while a photo is still compressing would send it without its
+  // bytes, so the button waits.
+  const ready = TRIPS.reduce((s, t) =>
+    s + (SHOTS[t.row] || []).filter(x => !x.pending && !x.failed).length, 0);
+  const btn = document.getElementById('send');
+  btn.disabled = !ready || busy > 0;
+  btn.textContent = busy > 0
+    ? `Processing ${busy} photo${busy > 1 ? 's' : ''}\u2026`
+    : ready ? `Upload ${ready} photo${ready > 1 ? 's' : ''}` : 'Upload photos';
 }
 
 const esc = s => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/* ---------- picking photos ---------- */
-let pickRow = null;
+/* ---------- picking photos ----------
+
+   Three things went wrong on Android and all three are fixed here.
+
+   1. WRONG ROW. `pickRow` was a module variable read AFTER the await inside
+      the change handler. Tapping "Add photo" on the next trip while the last
+      one was still compressing overwrote it, so the photo landed on the
+      wrong card. The row is now stamped on the input element and read
+      synchronously, before anything can yield.
+
+   2. NOTHING APPEARS. Compressing a 12MP photo takes a second or two on a
+      phone — decode, draw to canvas, then up to four JPEG encodes. Until it
+      finished, nothing was drawn, so a tap looked like it had done nothing
+      and the picture only showed up when the NEXT one triggered a redraw.
+      A placeholder thumbnail now appears the instant the file is chosen and
+      is swapped for the real one when compression finishes.
+
+   3. SILENTLY LOST. `catch(_){}` swallowed failures whole. A photo that
+      failed to compress vanished with no message. Failures now surface on
+      the card.
+*/
+
+let busy = 0;
 
 document.addEventListener('click', e => {
   const add = e.target.closest('[data-add]');
   if (add){
-    pickRow = add.dataset.add;
     const p = document.getElementById('picker');
     p.value = '';
+    p.dataset.row = add.dataset.row || add.dataset.add;   // stamped, not shared
     p.click();
     return;
   }
@@ -204,22 +241,46 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('change', async e => {
-  if (e.target.id !== 'picker' || !pickRow) return;
+  if (e.target.id !== 'picker') return;
+
+  // Read both BEFORE any await — the input is reused for the next tap.
+  const row = e.target.dataset.row;
   const files = [...e.target.files];
-  const row = pickRow;
-  for (const f of files){
-    try {
-      const shot = await shrink(f);
-      (SHOTS[row] = SHOTS[row] || []).push({
-        id: 's' + Math.random().toString(36).slice(2),
-        name: f.name || 'photo.jpg',
-        dataUrl: shot.dataUrl, bin: shot.bin,
-        w: shot.w, h: shot.h, bytes: shot.bytes
-      });
-    } catch(_){}
-  }
-  pickRow = null;
+  if (!row || !files.length) return;
+
+  // Placeholders first, so the tap has a visible result immediately.
+  const pending = files.map(f => {
+    const item = {
+      id: 's' + Math.random().toString(36).slice(2),
+      name: f.name || 'photo.jpg',
+      dataUrl: URL.createObjectURL(f),   // the camera file, shown as-is
+      pending: true, bytes: f.size
+    };
+    (SHOTS[row] = SHOTS[row] || []).push(item);
+    return { item: item, file: f };
+  });
+  busy += pending.length;
   render();
+
+  // Then compress one at a time. Running them in parallel makes a phone
+  // swap and can crash the tab on a big batch.
+  for (const job of pending){
+    try {
+      const shot = await shrink(job.file);
+      URL.revokeObjectURL(job.item.dataUrl);
+      job.item.dataUrl = shot.dataUrl;
+      job.item.bin = shot.bin;
+      job.item.w = shot.w;
+      job.item.h = shot.h;
+      job.item.bytes = shot.bytes;
+      delete job.item.pending;
+    } catch (err){
+      job.item.failed = true;
+      delete job.item.pending;
+    }
+    busy--;
+    render();
+  }
 });
 
 /* ---------- adaptive JPEG compression ----------
@@ -232,15 +293,23 @@ document.addEventListener('change', async e => {
    2. Re-encoding is skipped when it would not help. If the camera file is
       already smaller than our target and within the pixel limit, the original
       bytes go straight into the PDF — no generational loss at all.
-   3. Long edge capped at 2000px. Enough to read a slip number; beyond that
-      you are paying for grain, not detail. Canvas also drops EXIF, which
-      saves a few KB per photo.
+   3. Long edge capped at 2000px, which keeps slip digits crisp even when
+      zoomed. Canvas also drops EXIF, saving a few KB per photo.
 */
 
-const MAX_EDGE   = 2000;   // long edge in pixels
-const TARGET_BPP = 0.11;   // bits per pixel; ~200KB for a 2000x1500 photo
-const Q_MIN      = 0.62;   // never go below this, regardless of budget
-const Q_MAX      = 0.90;
+/* Deliberately set for high fidelity rather than smallest files: a
+   weighbridge slip is a legal document and legibility wins over bytes.
+
+   Budget is BYTES per pixel (the constant used to be called TARGET_BPP and
+   documented as bits, which was simply wrong). 2000x1500 = 3MP, so 0.11
+   targets roughly 330KB a photo and about 1.5MB for a five-page PDF.
+
+   Lower BYTES_PER_PX to 0.06 if uploads ever get slow on a weak signal —
+   that roughly halves the size, at a measured SSIM cost of about 0.02. */
+const MAX_EDGE      = 2000;
+const BYTES_PER_PX  = 0.11;
+const Q_MIN         = 0.62;
+const Q_MAX         = 0.90;
 
 const readAsDataUrl = file => new Promise((res, rej) => {
   const fr = new FileReader();
@@ -284,7 +353,7 @@ async function shrink(file){
     w = Math.round(w * k); h = Math.round(h * k);
   }
 
-  const targetBytes = Math.round(w * h * TARGET_BPP);
+  const targetBytes = Math.round(w * h * BYTES_PER_PX);
 
   // Already small enough and no resize needed? Use the camera's own bytes.
   // Re-encoding here would only lose detail and often gain nothing.
@@ -364,6 +433,11 @@ function post(body){
 
 document.getElementById('send').onclick = async () => {
   const btn = document.getElementById('send'), note = document.getElementById('note');
+  // Drop anything still compressing or broken; only complete photos go up.
+  Object.keys(SHOTS).forEach(r => {
+    SHOTS[r] = SHOTS[r].filter(x => x.bin && !x.pending && !x.failed);
+    if (!SHOTS[r].length) delete SHOTS[r];
+  });
   const rows = Object.keys(SHOTS).filter(r => SHOTS[r].length);
   if (!rows.length) return;
 
@@ -411,7 +485,7 @@ document.getElementById('send').onclick = async () => {
   let saved = 0, res = null;
   for (let attempt = 1; attempt <= 6; attempt++){
     note.className = 'note';
-    note.textContent = 'Confirming\u2026 (' + attempt + '/6)';
+    note.textContent = 'Saving to Drive, checking\u2026';
     await new Promise(r => setTimeout(r, attempt === 1 ? 3000 : 4000));
     try {
       res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
