@@ -97,7 +97,17 @@
 <script>
 const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
 
-const BATCH = new URLSearchParams(location.search).get('b') || '';
+const QS    = new URLSearchParams(location.search);
+const BATCH = QS.get('b') || '';
+
+/* The access code, carried through from the QR link. doPost gates photo
+   uploads exactly like log writes, so without this every upload is rejected
+   with 'code missing' before it ever reaches Drive. Kept per device too, so a
+   reopened link still works after the QR tab is gone. */
+let ACCESS_CODE = QS.get('k') || localStorage.getItem('bhi_code') || '';
+if (QS.get('k')) {
+  try { localStorage.setItem('bhi_code', QS.get('k')); } catch (_) {}
+}
 let TRIPS = [];                 // rows from the sheet
 const SHOTS = {};               // rowNumber -> [{id, dataUrl, name}]
 
@@ -424,6 +434,7 @@ function pdfForTrip(trip, shots){
 }
 
 function post(body){
+  body.code = ACCESS_CODE;          // required by doPost's access gate
   return fetch(ENDPOINT, {
     method: 'POST', mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -503,8 +514,16 @@ document.getElementById('send').onclick = async () => {
   } else if (res){
     if (saved){ TRIPS = res.trips; render(); }
     note.className = 'note err';
-    note.textContent = saved + ' of ' + rows.length +
-      ' saved. Tap Upload again for the rest.';
+    if (!saved && !ACCESS_CODE){
+      // Nothing saved and no code to send: the server refused every request.
+      note.textContent = 'No access code. Re-scan the QR code on the computer.';
+    } else if (!saved){
+      note.textContent = 'Nothing saved. Your access code may have been ' +
+                         'withdrawn — check with the office, or re-scan the QR.';
+    } else {
+      note.textContent = saved + ' of ' + rows.length +
+                         ' saved. Tap Upload again for the rest.';
+    }
   } else {
     note.className = 'note';
     note.textContent = 'Uploaded, but could not confirm \u2014 check the sheet.';
