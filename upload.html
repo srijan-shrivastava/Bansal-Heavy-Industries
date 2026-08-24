@@ -96,7 +96,7 @@
 </header>
 
 <div class="progress" id="prog" hidden>
-  <span><b id="pDone">0</b> of <b id="pTotal">0</b> trips have photos</span>
+  <span id="progText">Loading&hellip;</span>
   <span id="pShots" style="float:right"></span>
   <div class="track"><i id="pBar"></i></div>
 </div>
@@ -148,8 +148,21 @@ async function load(){
     document.getElementById('sub').textContent = '';
     return;
   }
+  let res;
   try{
-    const res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
+    res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
+  }catch(err){
+    document.getElementById('list').innerHTML =
+      `<div class="state"><h2>Could not load</h2>
+       Check your internet connection, then pull down to refresh.</div>`;
+    document.getElementById('sub').textContent = '';
+    return;
+  }
+
+  /* Drawing is a separate try. Lumping it in with the fetch meant any render
+     bug was reported as "check your internet connection", which sent us
+     looking in the wrong place entirely. */
+  try{
     TRIPS = (res && res.trips) || [];
     if (!TRIPS.length){
       document.getElementById('list').innerHTML =
@@ -171,10 +184,11 @@ async function load(){
 
     render();
   }catch(err){
+    console.error('render failed', err);
     document.getElementById('list').innerHTML =
-      `<div class="state"><h2>Could not load</h2>
-       Check your internet connection and pull down to refresh.</div>`;
-    document.getElementById('sub').textContent = '';
+      `<div class="state"><h2>Something went wrong</h2>
+       ${esc(String(err && err.message || err))}
+       <br><br>Send this message to the office.</div>`;
   }
 }
 
@@ -248,11 +262,13 @@ function render(){
       '<div class="allset">All documents uploaded for this batch.' +
       '<span>You can close this page.</span></div>');
   }
-  document.getElementById('pDone').textContent = done;
-  document.getElementById('prog').firstElementChild.innerHTML =
-    allDone ? '<b>All ' + TRIPS.length + '</b> trips uploaded'
-            : '<b>' + done + '</b> of <b>' + TRIPS.length + '</b> trips have photos';
-  document.getElementById('pTotal').textContent = TRIPS.length;
+  /* One write for the whole line. An earlier version set #pDone, then
+     replaced the span's innerHTML (destroying #pDone and #pTotal), then tried
+     to set #pTotal — which by then was null, and the thrown error surfaced as
+     a bogus "check your internet connection". */
+  document.getElementById('progText').innerHTML = allDone
+    ? '<b>All ' + TRIPS.length + '</b> trip' + (TRIPS.length > 1 ? 's' : '') + ' uploaded'
+    : '<b>' + done + '</b> of <b>' + TRIPS.length + '</b> trips have photos';
   document.getElementById('pShots').textContent = total ? total + ' photo' + (total > 1 ? 's' : '') : '';
   document.getElementById('pBar').style.width = (done / TRIPS.length * 100) + '%';
   // Uploading while a photo is still compressing would send it without its
