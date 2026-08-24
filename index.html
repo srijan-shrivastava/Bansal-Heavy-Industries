@@ -478,8 +478,10 @@ let SYNC_FAILED = false;
 let ACCESS_CODE = localStorage.getItem('bhi_code') || '';
 
 const LOCK_TEXT = {
-  revoked:     'That code has been switched off. Contact the office.',
+  revoked:     'Your access has been withdrawn. Contact the office if you '
+             + 'think this is a mistake.',
   unknown:     'That code was not recognised.',
+  wrongrole:   'That code no longer opens data entry.',
   missing:     'Enter your access code to continue.',
   notab:       'Access list not found in the workbook. Contact the office.',
   unavailable: 'Cannot reach the workbook, so your code cannot be checked. '
@@ -512,9 +514,11 @@ document.getElementById('lockGo').onclick = async () => {
   m.className = ''; m.textContent = 'Checking\u2026';
   ACCESS_CODE = code;
   await loadOverall();
-  if (AUTH_ERROR || SYNC_FAILED){
+  if (AUTH_ERROR){
+    lock(AUTH_ERROR);            // already cleared by loadOverall
+  } else if (SYNC_FAILED){
     ACCESS_CODE = '';
-    lock(AUTH_ERROR || 'offline');
+    lock('offline');
   } else {
     localStorage.setItem('bhi_code', code);
     document.getElementById('lockwrap').hidden = true;
@@ -535,9 +539,18 @@ async function loadOverall(){
     const res = await jsonp();
 
     if (res && res.authError){
+      // Enforced here rather than at each call site, so EVERY path that talks
+      // to the sheet — first load, the Refresh button, the post-submit
+      // reload — locks the page the moment access is withdrawn. A role
+      // changed from Overall to Data entry lands here too.
       AUTH_ERROR = res.authError;
       SYNC_FAILED = false;
       lbl.textContent = 'Locked';
+      localStorage.removeItem('bhi_code');
+      localStorage.removeItem('bhi_payload');
+      ACCESS_CODE = '';
+      OVERALL = {};
+      lock(AUTH_ERROR);
       return;
     }
     AUTH_ERROR = '';
@@ -603,6 +616,11 @@ headBtn.onclick = async () => {
   await loadOverall();
   const after = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
 
+  if (AUTH_ERROR){
+    // loadOverall has already locked the page; nothing more to show here.
+    headBtn.disabled = false;
+    return;
+  }
   if (SYNC_FAILED){
     setDot('off');
     m.style.color = '#d93025';
@@ -656,10 +674,7 @@ render(); renderTabs();
   await loadOverall();
 
   if (AUTH_ERROR){
-    // A definite refusal — forget the code so it is not retried silently.
-    localStorage.removeItem('bhi_code');
-    ACCESS_CODE = '';
-    lock(AUTH_ERROR);
+    lock(AUTH_ERROR);            // loadOverall has already cleared the code
   } else if (SYNC_FAILED){
     // Could not verify. Keep the stored code (it may well be valid) but do
     // not open the form: unverified means locked.
