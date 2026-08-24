@@ -494,17 +494,33 @@ document.getElementById("submit").onclick = async ()=>{
 };
 
 /* ---- all-time totals, read from the sheet's own KPI cells ---- */
+/* JSONP with a timeout that does not leave a landmine behind.
+
+   The old version deleted window[cb] the moment it gave up. Apps Script cold
+   starts can take longer than the timeout, so the response would arrive
+   afterwards, call a function that no longer existed, and throw
+   "ReferenceError: cb... is not defined" into the console. Worse, the page
+   had already decided it was offline and said so while showing stale figures.
+
+   Now: the callback is replaced by a no-op rather than deleted, the script
+   tag is cleaned up late, and the window is long enough for a cold start. */
 function jsonp(params){
   return new Promise((resolve, reject) => {
     const cb = 'cb' + Math.random().toString(36).slice(2);
-    const s = document.createElement('script');
-    const done = () => { delete window[cb]; s.remove(); };
-    const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 20000);
-    window[cb] = d => { clearTimeout(timer); done(); resolve(d); };
-    s.onerror = () => { clearTimeout(timer); done(); reject(new Error('fetch failed')); };
-    s.src = ENDPOINT + '?callback=' + cb + (params ? '&' + params : '') +
-            (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
-    document.head.appendChild(s);
+    const el = document.createElement('script');
+
+    const retire = () => {
+      window[cb] = () => {};
+      setTimeout(() => { try { delete window[cb]; } catch(_){} }, 60000);
+      el.remove();
+    };
+
+    const timer = setTimeout(() => { retire(); reject(new Error('timeout')); }, 45000);
+    window[cb] = d => { clearTimeout(timer); retire(); resolve(d); };
+    el.onerror = () => { clearTimeout(timer); retire(); reject(new Error('fetch failed')); };
+    el.src = ENDPOINT + '?callback=' + cb + (params ? '&' + params : '') +
+             (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
+    document.head.appendChild(el);
   });
 }
 
