@@ -149,17 +149,35 @@ const esc = s => String(s == null ? '' : s)
 
 const inr = v => Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
+/* JSONP with a timeout that does not leave a landmine behind.
+
+   The old version deleted window[cb] the moment it gave up. Apps Script cold
+   starts can take longer than the timeout, so the response would arrive
+   afterwards, call a function that no longer existed, and throw
+   "ReferenceError: cb... is not defined" into the console. Worse, the page
+   had already decided it was offline and said so while showing stale figures.
+
+   Now: the callback is replaced by a no-op rather than deleted, the script
+   tag is cleaned up late, and the window is long enough for a cold start. */
 function jsonp(params){
   return new Promise((resolve, reject) => {
     const cb = 'cb' + Math.random().toString(36).slice(2);
-    const s = document.createElement('script');
-    const done = () => { delete window[cb]; s.remove(); };
-    const t = setTimeout(() => { done(); reject(new Error('timeout')); }, 25000);
-    window[cb] = d => { clearTimeout(t); done(); resolve(d); };
-    s.onerror = () => { clearTimeout(t); done(); reject(new Error('failed')); };
-    s.src = ENDPOINT + '?' + params + '&callback=' + cb +
-            (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
-    document.head.appendChild(s);
+    const el = document.createElement('script');
+
+    const cleanup = () => { el.remove(); };
+    const retire = () => {
+      // Keep the name defined so a late reply lands harmlessly, then tidy up.
+      window[cb] = () => {};
+      setTimeout(() => { try { delete window[cb]; } catch(_){} }, 60000);
+      cleanup();
+    };
+
+    const t = setTimeout(() => { retire(); reject(new Error('timeout')); }, 45000);
+    window[cb] = d => { clearTimeout(t); retire(); resolve(d); };
+    el.onerror = () => { clearTimeout(t); retire(); reject(new Error('failed')); };
+    el.src = ENDPOINT + '?' + params + '&callback=' + cb +
+             (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
+    document.head.appendChild(el);
   });
 }
 
