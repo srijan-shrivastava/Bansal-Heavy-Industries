@@ -1,5 +1,1185 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BHI — Fleet</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#232326">
+<style>
+  :root{
+    /* entry palette */
+    --grid:#e2e3e3; --head:#f8f9fa; --sel:#1a73e8; --green:#0f9d58;
+    --txt:#202124; --muted:#5f6368; --ro:#f1f3f4;
+    /* dashboard palette */
+    --ink:#232326; --accent:#F25505; --paper:#f6f6f4; --card:#fff;
+    --line:#e4e4e1; --pos:#12855b; --neg:#c62828;
+  }
+  [hidden]{display:none!important}
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.4 Arial,Roboto,sans-serif;color:var(--txt);background:#fff}
+
+  /* ---------- shared chrome ---------- */
+  header{padding:10px 14px;border-bottom:1px solid var(--grid);background:#fff;
+       display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header img.logo{height:28px;width:auto;display:block;flex:none}
+
+  /* View switcher. Only rendered for a code whose Role covers both areas. */
+  .views{display:flex;gap:2px;padding-left:14px;border-left:1px solid var(--grid)}
+  .views button{font:inherit;font-size:11px;font-weight:700;letter-spacing:1.4px;
+       text-transform:uppercase;color:var(--muted);background:none;border:none;
+       padding:7px 12px;border-radius:5px;cursor:pointer}
+  .views button:hover{color:var(--txt);background:var(--head)}
+  .views button[aria-current="true"]{color:#fff;background:var(--ink)}
+  .viewtitle{font-size:12px;font-weight:700;letter-spacing:1.6px;
+       text-transform:uppercase;padding-left:14px;border-left:1px solid var(--grid)}
+
+  .who{font-size:12px;color:var(--muted)}
+  .who input,.who select{font:inherit;border:1px solid var(--grid);border-radius:4px;
+       padding:3px 6px;width:auto;height:auto;background:#fff}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none;
+       transition:background .3s}
+  .dot.busy{background:var(--accent)} .dot.off{background:#d93025}
+
+  @media(max-width:700px){
+    header{gap:10px;padding:9px 12px}
+    header img.logo{height:22px}
+    .views{padding-left:10px}
+    .views button{padding:6px 9px;font-size:10px;letter-spacing:1px}
+    .viewtitle{font-size:10.5px;padding-left:10px}
+  }
+
+  /* ---------- lock screen (one for the whole app) ---------- */
+  .lockwrap{position:fixed;inset:0;background:var(--paper);z-index:60;
+       display:flex;align-items:center;justify-content:center;padding:24px}
+  .lockwrap[hidden]{display:none}
+  .lockbox{max-width:320px;width:100%;text-align:center}
+  .lockbox .logo{height:30px;margin:0 auto 26px;display:block}
+  .lockbox h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  .lockbox p{font-size:12px;color:var(--muted);margin:0 0 18px;min-height:34px;line-height:1.5}
+  .lockbox p.err{color:var(--neg)}
+  .lockbox input{width:100%;height:44px;font-size:20px;text-align:center;
+       letter-spacing:6px;border:1px solid var(--line);border-radius:6px;
+       margin-bottom:12px;background:#fff;font-family:inherit}
+  .lockbox input:focus{outline:none;border-color:var(--accent)}
+  .lockbox button{width:100%;padding:11px;font:inherit;font-weight:700;
+       background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer}
+  .lockbox button:disabled{opacity:.5;cursor:default}
+
+  /* Dashboard view sits on its own paper background. */
+  #dashView{background:var(--paper);min-height:calc(100vh - 50px)}
+
+/* ============================================================
+   DATA ENTRY view — scoped to #entryView
+   ============================================================ */
+
+  #entryView .hright{margin-left:auto;display:flex;align-items:center;gap:10px}
+  #entryView .hright button{font:inherit;font-size:11px;font-weight:600;letter-spacing:.4px;
+       color:var(--muted);background:#fff;border:1px solid var(--grid);
+       border-radius:4px;padding:5px 11px;cursor:pointer}
+  #entryView .hright button:hover{border-color:var(--accent);color:var(--txt)}
+  #entryView .hright button:disabled{opacity:.5;cursor:default}
+  #entryView .dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none;
+       transition:background .3s}
+  #entryView .dot.busy{background:var(--accent)} #entryView .dot.off{background:#d93025}
+  #entryView #syncMsg{font-size:11px}
+  @media(max-width:640px){
+    header{gap:12px}
+    #entryView .hright{width:100%;margin-left:0;justify-content:flex-end}
+    header img.logo{height:22px}
+    header h1{font-size:10.5px;padding-left:12px}
+  }
+  #entryView .who{font-size:12px;color:var(--muted)}
+  #entryView .who input, #entryView .who select{font:inherit;border:1px solid var(--grid);border-radius:4px;
+       padding:3px 6px;width:auto;height:auto;background:#fff}
+  #entryView td input.backdated{background:#fff4e5}
+  #entryView /* tab strip like Sheets (bottom bar) */
+  .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--head);border-top:1px solid var(--grid);
+          display:flex;align-items:center;gap:2px;padding:0 10px;height:44px;z-index:5}
+  #entryView .tab{padding:0 16px;height:44px;line-height:44px;font-size:13px;cursor:pointer;color:var(--muted);
+       border:none;background:none;font-family:inherit}
+  #entryView .tab[aria-selected="true"]{background:#fff;color:var(--green);font-weight:700;box-shadow:0 -2px 0 var(--green) inset}
+  #entryView .tabbar .spacer{flex:1}
+  #entryView .kpis{display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--grid);background:var(--head)}
+  #entryView .kpi{padding:6px 14px;border-right:1px solid var(--grid);min-width:150px}
+  #entryView .kpi b{display:block;font-size:10px;letter-spacing:.5px;color:var(--muted);font-weight:700}
+  #entryView .kpi span{font-size:15px;font-weight:700}
+  #entryView .wrap{overflow:auto;padding-bottom:96px}
+  #entryView table{border-collapse:collapse;width:max-content;min-width:100%}
+  #entryView th, #entryView td{border:1px solid var(--grid);padding:0;height:28px;white-space:nowrap}
+  #entryView th{background:var(--head);font-size:12px;font-weight:700;padding:0 8px;text-align:left;position:sticky;top:0;z-index:2}
+  #entryView td.rownum, #entryView th.rownum{background:var(--head);text-align:center;color:var(--muted);width:38px;
+       font-size:11px;position:sticky;left:0;z-index:1;padding:0 4px}
+  #entryView th.rownum{z-index:3}
+  #entryView input, #entryView select{width:100%;height:26px;border:none;padding:0 6px;font:inherit;background:transparent;outline:none}
+  #entryView input:focus, #entryView select:focus{box-shadow:0 0 0 2px var(--sel) inset}
+  #entryView td.calc{background:var(--ro);color:#3c4043;padding:0 6px;text-align:left;font-variant-numeric:tabular-nums}
+  #entryView td input, #entryView td select{text-align:left}
+  #entryView /* hide the native up/down spinners on number fields */
+  input[type=number]{-moz-appearance:textfield;appearance:textfield}
+  #entryView input[type=number]::-webkit-outer-spin-button, #entryView input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  #entryView .bar{position:fixed;bottom:44px;left:0;right:0;background:#fff;border-top:1px solid var(--grid);
+       padding:8px 14px;display:flex;gap:10px;align-items:center;z-index:4}
+  #entryView button.act{font:inherit;padding:7px 14px;border-radius:4px;border:1px solid var(--grid);background:#fff;cursor:pointer}
+  #entryView button.primary{background:var(--green);color:#fff;border-color:var(--green);font-weight:700}
+  #entryView button.primary:disabled{opacity:.5;cursor:default}
+  #entryView .msg{font-size:12px}
+  #entryView .msg.ok{color:var(--green)} #entryView .msg.err{color:#d93025}
+  #entryView .kpis.alltime{background:#fff;border-bottom:2px solid var(--grid)}
+  #entryView .kpis.alltime .kpi b{color:#8a8d91}
+  #entryView .kpis.alltime .kpi span{color:#2E3032}
+  #entryView .striplabel{font-size:10px;letter-spacing:.5px;color:#8a8d91;font-weight:700;
+              padding:4px 14px;background:var(--head);border-bottom:1px solid var(--grid);
+              display:flex;align-items:center;gap:8px}
+  #entryView .striplabel select{width:auto;height:22px;font-size:11px;font-weight:700;color:#3c4043;
+              border:1px solid var(--grid);border-radius:3px;background:#fff;padding:0 4px}
+  #entryView .striplabel button{font:inherit;font-size:10px;letter-spacing:.5px;color:#8a8d91;
+              border:1px solid var(--grid);border-radius:3px;background:#fff;padding:2px 8px;cursor:pointer}
+  #entryView .striplabel button:hover{color:var(--txt)}
+  #entryView .qrwrap{position:fixed;inset:0;background:rgba(32,33,36,.55);z-index:20;
+          display:flex;align-items:center;justify-content:center;padding:20px}
+  #entryView .qrwrap[hidden]{display:none}
+  #entryView .qrbox{background:#fff;border-radius:12px;padding:24px;max-width:380px;text-align:center;
+         box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  #entryView .qrbox h2{font-size:16px;margin:0 0 6px}
+  #entryView .qrbox p{font-size:13px;color:var(--muted);margin:0 0 16px;line-height:1.5}
+  #entryView .qrbox img{image-rendering:pixelated;width:220px;height:220px}
+  #entryView .qrlink{font-size:11px;color:var(--muted);word-break:break-all;margin:12px 0 16px}
+  #entryView .del{color:#d93025;cursor:pointer;border:none;background:none;font-size:15px;line-height:1}
+
+/* ============================================================
+   DASHBOARD view — scoped to #dashView
+   ============================================================ */
+
+  @media(max-width:640px){
+    header{padding:11px 14px;gap:12px}
+    header img.logo{height:24px}
+    header h1{font-size:11px;padding-left:12px}
+    header .right{width:100%;margin-left:0;justify-content:space-between}
+    #dashView main{padding:14px 12px 50px}
+    #dashView .kpi span{font-size:19px}
+  }
+
+  #dashView main{padding:20px 22px 60px;max-width:1320px;margin:0 auto}
+
+  #dashView section{margin-bottom:26px}
+  #dashView .shead{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+  #dashView .shead h2{font-size:12px;text-transform:uppercase;letter-spacing:1.3px;
+       margin:0;font-weight:700}
+  #dashView .shead .rule{flex:1;height:1px;background:var(--line)}
+  #dashView .shead .src{font-size:10.5px;color:var(--muted);letter-spacing:.3px}
+
+  #dashView .grid{display:grid;gap:10px;
+        grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+  #dashView .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;
+       padding:13px 15px 14px}
+  #dashView .kpi b{display:block;font-size:9.5px;letter-spacing:.9px;color:var(--muted);
+       font-weight:700;text-transform:uppercase;margin-bottom:5px;line-height:1.35}
+  #dashView .kpi span{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;
+       letter-spacing:-.4px}
+  #dashView .pos{color:var(--pos)} #dashView .neg{color:var(--neg)}
+
+  #dashView .charts{display:grid;gap:12px;grid-template-columns:2fr 1fr}
+  @media(max-width:900px){#dashView .charts{grid-template-columns:1fr}}
+  #dashView .panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:15px 17px}
+  #dashView .panel h3{font-size:10px;text-transform:uppercase;letter-spacing:1.1px;
+       margin:0 0 12px;color:var(--muted);font-weight:700}
+  #dashView /* Scoped to charts only. As a bare `svg{width:100%}#dashView ` this also hit the
+     header logo and blew it up to the full page width. */
+  .panel svg{display:block;width:100%;height:auto;overflow:visible}
+  #dashView .axis{font-size:9px;fill:var(--muted)}
+  #dashView .gline{stroke:var(--line);stroke-width:1}
+
+  #dashView .legend{display:flex;flex-direction:column;gap:7px;margin-top:12px;font-size:12px}
+  #dashView .legend div{display:flex;align-items:center;gap:8px}
+  #dashView .legend i{width:9px;height:9px;border-radius:2px;flex:none}
+  #dashView .legend em{margin-left:auto;font-style:normal;font-variant-numeric:tabular-nums;font-weight:600}
+
+  #dashView table{width:100%;border-collapse:collapse;font-size:12.5px}
+  #dashView th, #dashView td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+  #dashView th{font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;
+     color:var(--muted);font-weight:700}
+  #dashView th:first-child, #dashView td:first-child{text-align:left}
+  #dashView tbody tr:hover{background:#faf9f7}
+  #dashView .scroll{overflow-x:auto}
+
+  #dashView .state{padding:70px 20px;text-align:center;color:var(--muted)}
+  #dashView .state b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
+  #dashView .stale{background:#fff4e5;border:1px solid #f0d9b5;border-radius:6px;
+         padding:9px 13px;font-size:12px;margin-bottom:18px}
+
+</style>
+
+<header>
+  <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+
+  <div class="views" id="views" hidden>
+    <button type="button" data-view="entry" aria-current="true">Data Entry</button>
+    <button type="button" data-view="dash">Dashboard</button>
+  </div>
+  <span class="viewtitle" id="viewTitle" hidden></span>
+
+  <label class="who" id="filledByWrap">Filled by
+    <input id="filledBy" placeholder="your name"></label>
+  <span class="who" id="today"></span>
+
+  <div class="hright" id="entryControls" style="margin-left:auto;display:flex;align-items:center;gap:10px">
+    <span class="dot" id="dot" title="Live"></span>
+    <span class="who" id="syncMsg"></span>
+    <button type="button" id="headRefresh"
+            title="Re-read clients, trucks and driver names from the sheet">Refresh</button>
+  </div>
+
+  <div class="hright" id="dashControls" hidden
+       style="margin-left:auto;display:flex;align-items:center;gap:10px">
+    <span class="dot" id="dashDot" title="Live"></span>
+    <span class="who" id="stamp"></span>
+    <button type="button" id="reload">Refresh</button>
+  </div>
+</header>
+
+<div id="entryView">
+<div class="striplabel">
+  <span id="overallLabel">All-Time Totals</span>
+  <select id="rangeSel" aria-label="Summary period">
+    <option value="all" selected>All time</option>
+    <option value="today">Today</option>
+    <option value="yesterday">Yesterday</option>
+    <option value="last3">Last 3 days</option>
+    <option value="last7">Last 7 days</option>
+    <option value="last30">Last 30 days</option>
+    <option value="last365">Last 365 days</option>
+  </select>
+</div>
+<div class="kpis alltime" id="overall"></div>
+<div class="striplabel">THIS SESSION — NOT YET SUBMITTED</div>
+<div class="kpis" id="kpis"></div>
+<div class="wrap"><div id="pane"></div></div>
+
+<div class="bar">
+  <button class="act" id="addRow">+ Add row</button>
+  <button class="act" id="addFive">+ 5 rows</button>
+  <div style="flex:1"></div>
+  <span class="msg" id="msg"></span>
+  <button class="act primary" id="submit">Submit all three logs</button>
+</div>
+
+<div class="qrwrap" id="qrwrap" hidden>
+  <div class="qrbox">
+    <h2>Add photos from your phone</h2>
+    <p>Scan this with the phone camera to attach weighbridge slips and load
+       photos to the <b id="qrCount">0</b> trips just submitted.</p>
+    <div id="qrcode"></div>
+    <div class="qrlink" id="qrlink"></div>
+    <button class="act" id="qrclose">Done</button>
+  </div>
+</div>
+
+<div class="tabbar" role="tablist" id="tabs"></div>
+</div>
+
+<div id="dashView" hidden>
+<main>
+  <div class="stale" id="stale" hidden></div>
+  <div id="dashBody"><div class="state"><b>Loading</b>Reading the workbook…</div></div>
+</main>
+</div>
+
+<div class="lockwrap" id="lockwrap" hidden>
+  <div class="lockbox">
+    <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
+    <h2>Enter your access code</h2>
+    <p id="lockMsg">Ask the office if you do not have one.</p>
+    <input id="lockCode" type="text" inputmode="numeric" autocomplete="off"
+           maxlength="12" placeholder="\u2022\u2022\u2022\u2022">
+    <button id="lockGo">Unlock</button>
+  </div>
+</div>
+
+<script src="qr.min.js"></script>
+<script>
+/* ============================================================
+   SHARED — endpoint, access, transport, view switching
+   ============================================================ */
+
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzGSlQalJ6YgpFOkvBMNxMYML3l7nQlYIhX0ADMHoys2qXBd3xxcqRbL4va3UyQVoRJ/exec';
+
+/* One code for the whole app, checked against the Access tab on every call.
+   The Role column decides which views exist for that code:
+
+     'Data entry' -> entry only
+     'Dashboard'  -> dashboard only
+     'Overall'    -> both, with a switcher in the header
+     (blank)      -> both
+
+   The switcher is convenience, not security. Each data call is gated on its
+   own area server-side, so a code with 'Data entry' gets authError from the
+   dashboard feed even if the tab were forced open. FAIL CLOSED throughout:
+   an unreachable workbook keeps the app locked. */
+
+let ACCESS_CODE = localStorage.getItem('bhi_code') || '';
+let AUTH_ERROR  = '';
+let ALLOWED     = { entry: false, dash: false };
+let VIEW        = 'entry';
+
+const LOCK_TEXT = {
+  revoked:     'Your access has been withdrawn. Contact the office if you '
+             + 'think this is a mistake.',
+  unknown:     'That code was not recognised.',
+  wrongrole:   'Your access does not cover this page.',
+  missing:     'Enter your access code to continue.',
+  notab:       'Access list not found in the workbook. Contact the office.',
+  unavailable: 'Cannot reach the workbook, so your code cannot be checked. '
+             + 'Try again in a minute.',
+  offline:     'No connection to the workbook. Your code cannot be checked '
+             + 'right now, so the app is not available. Try again shortly.'
+};
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* JSONP with a timeout that does not leave a landmine behind: on giving up
+   the callback becomes a no-op rather than being deleted, so a late reply
+   from a cold-starting Apps Script lands harmlessly instead of throwing. */
+function jsonp(params){
+  return new Promise((resolve, reject) => {
+    const cb = 'cb' + Math.random().toString(36).slice(2);
+    const el = document.createElement('script');
+    const retire = () => {
+      window[cb] = () => {};
+      setTimeout(() => { try { delete window[cb]; } catch(_){} }, 60000);
+      el.remove();
+    };
+    const timer = setTimeout(() => { retire(); reject(new Error('timeout')); }, 45000);
+    window[cb] = d => { clearTimeout(timer); retire(); resolve(d); };
+    el.onerror = () => { clearTimeout(timer); retire(); reject(new Error('failed')); };
+    el.src = ENDPOINT + '?callback=' + cb + (params ? '&' + params : '') +
+             (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
+    document.head.appendChild(el);
+  });
+}
+
+function lock(reason){
+  const w = document.getElementById('lockwrap');
+  const m = document.getElementById('lockMsg');
+  const i = document.getElementById('lockCode');
+  if (reason){
+    m.textContent = LOCK_TEXT[reason] || String(reason);
+    m.className = (reason === 'missing') ? '' : 'err';
+  }
+  w.hidden = false;
+  // Nothing behind the lock should be readable.
+  document.getElementById('overall').innerHTML = '';
+  document.getElementById('pane').innerHTML = '';
+  document.getElementById('dashBody').innerHTML = '';
+  document.getElementById('views').hidden = true;
+  document.getElementById('viewTitle').hidden = true;
+  i.value = '';
+  setTimeout(() => i.focus(), 50);
+}
+
+/** Central handler: any authError anywhere ends the session. */
+function denied(reason){
+  AUTH_ERROR = reason;
+  ACCESS_CODE = '';
+  ALLOWED = { entry: false, dash: false };
+  try {
+    localStorage.removeItem('bhi_code');
+    localStorage.removeItem('bhi_payload');
+    localStorage.removeItem('bhi_dash');
+  } catch(_){}
+  OVERALL = {};
+  lock(reason);
+}
+
+/* ---------- view switching ---------- */
+
+function applyRole(role){
+  const r = String(role || '').trim().toLowerCase();
+  ALLOWED.entry = (r === '' || r === 'overall' || r === 'data entry');
+  ALLOWED.dash  = (r === '' || r === 'overall' || r === 'dashboard');
+
+  const both = ALLOWED.entry && ALLOWED.dash;
+  document.getElementById('views').hidden = !both;
+  document.getElementById('viewTitle').hidden = both;
+  if (!both){
+    document.getElementById('viewTitle').textContent =
+      ALLOWED.dash ? 'Dashboard' : 'Data Entry';
+  }
+  if (!ALLOWED[VIEW]) VIEW = ALLOWED.entry ? 'entry' : 'dash';
+}
+
+function setView(v){
+  if (!ALLOWED[v]) return;
+  VIEW = v;
+  document.getElementById('entryView').hidden = (v !== 'entry');
+  document.getElementById('dashView').hidden  = (v !== 'dash');
+  document.getElementById('entryControls').hidden = (v !== 'entry');
+  document.getElementById('dashControls').hidden  = (v !== 'dash');
+  document.getElementById('filledByWrap').hidden = (v !== 'entry');
+  document.getElementById('today').hidden = (v !== 'entry');
+  document.querySelectorAll('#views button').forEach(b => {
+    b.setAttribute('aria-current', b.dataset.view === v ? 'true' : 'false');
+  });
+  try { localStorage.setItem('bhi_view', v); } catch(_){}
+
+  // Load the view on first open, and keep the dashboard poll off while hidden.
+  if (v === 'dash'){
+    if (!lastLoaded) loadDash(false); else dashSchedule();
+  } else {
+    clearTimeout(timer);
+  }
+}
+
+document.getElementById('views').addEventListener('click', e => {
+  const b = e.target.closest('[data-view]');
+  if (b) setView(b.dataset.view);
+});
+
+/* ---------- unlock ---------- */
+
+document.getElementById('lockGo').onclick = async () => {
+  const i = document.getElementById('lockCode');
+  const m = document.getElementById('lockMsg');
+  const code = i.value.trim();
+  if (!code) return;
+  m.className = ''; m.textContent = 'Checking\u2026';
+
+  ACCESS_CODE = code;
+  let me;
+  try { me = await jsonp('action=me'); }
+  catch(err){ ACCESS_CODE = ''; lock('offline'); return; }
+
+  if (!me || me.authError){ denied(me && me.authError || 'unavailable'); return; }
+
+  try { localStorage.setItem('bhi_code', code); } catch(_){}
+  AUTH_ERROR = '';
+  applyRole(me.role);
+  document.getElementById('lockwrap').hidden = true;
+  await startSession();
+};
+
+document.getElementById('lockCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('lockGo').click();
+});
+
+/* ---------- boot ---------- */
+
+async function startSession(){
+  const want = localStorage.getItem('bhi_view');
+  if (want && ALLOWED[want]) VIEW = want;
+  setView(VIEW);
+  if (ALLOWED.entry) await loadOverall();
+}
+
+(async () => {
+  if (!ACCESS_CODE){ lock('missing'); return; }
+  let me;
+  try { me = await jsonp('action=me'); }
+  catch(err){ lock('offline'); return; }          // keep the code, just locked
+
+  if (!me || me.authError){ denied(me && me.authError || 'unavailable'); return; }
+
+  AUTH_ERROR = '';
+  applyRole(me.role);
+  document.getElementById('lockwrap').hidden = true;
+  await startSession();
+})();
+
+
+/* ============================================================
+   DATA ENTRY view
+   ============================================================ */
+
+/* ============================================================
+   1. CONFIG — edit these lists to match 'Settings & Fixed Costs'
+   ============================================================ */
+
+
+/* These are only a fallback for the first load or when offline. The live
+   values come from 'Settings & Fixed Costs' via getLists(). */
+let CLIENTS = { "JPL": 450, "NALCO": 520 };
+let TRUCKS  = { "TRK-01": 12, "TRK-02": 12.4 };
+let DRIVERS = [];          // filled from Employees Data (Designation = Driver)
+let EMPLOYEES = [];
+const SHIFTS    = ["Day","Night"];
+const FM_TYPES  = ["Fuel","Repair","Maintenance"];
+const CASH_TYPE = ["Credit Received","Expense"];
+const CASH_CAT  = ["Advance Received","Driver Batta","Food/Tea","Toll","Parking",
+                   "Loading/Unloading Charges","Weighbridge Fee","Miscellaneous","Other"];
+const CASH_MODE = ["Cash","UPI","Bank Transfer","Driver","Supervisor","Office","Other"];
+let TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+let   OPENING_BALANCE = 0;        // running balance carried from the sheet; see note below
+
+/* ============================================================
+   2. COLUMN DEFINITIONS (mirror the sheet, left to right)
+   ============================================================ */
+const today = new Date().toISOString().slice(0,10);
+const mmm = d => d ? new Date(d+"T00:00:00")
+      .toLocaleDateString("en-GB",{month:"short",year:"numeric"}).replace(" ","-") : "";
+const n = v => parseFloat(v)||0;
+const rs = v => v===""||v==null ? "" : Number(v).toLocaleString("en-IN",{maximumFractionDigits:2});
+
+const SHEETS = {
+  trip:{
+    label:"Daily Trip Log", sheet:"Daily Trip Log",
+    cols:[
+      {k:"client",   h:"Client Name",             t:"select", o:()=>Object.keys(CLIENTS)},
+      {k:"date",     h:"Date",                    t:"date",   d:()=>today},
+      {k:"month",    h:"Month",                   t:"calc",   f:r=>mmm(r.date)},
+      {k:"shift",    h:"Shift",                   t:"select", o:()=>SHIFTS},
+      {k:"truck",    h:"Truck ID",                t:"select", o:()=>Object.keys(TRUCKS)},
+      {k:"driver",   h:"Driver Name",             t:"select", o:()=>DRIVERS},
+      {k:"tripNo",   h:"Trip No.",                t:"number"},
+      {k:"slipNo",   h:"Weighbridge Slip No.",    t:"text"},
+      // Entered in KILOGRAMS off the weighbridge slip, stored in the sheet as
+      // TONNES. `lab` is what the operator sees, `h` is the sheet header the
+      // value is written under, `toSheet` does the conversion on submit.
+      {k:"gross",    h:"Gross Weight (in Tonnes)", lab:"Gross Weight (kg)",
+       t:"number", toSheet:v => v==="" ? "" : (n(v)/1000).toFixed(3)},
+      {k:"tare",     h:"Tare Weight (In Tonnes)",  lab:"Tare Weight (kg)",
+       t:"number", toSheet:v => v==="" ? "" : (n(v)/1000).toFixed(3)},
+      {k:"net",      h:"Net Weight (in Tonnes)",   lab:"Net Weight (Tonnes)",
+       t:"calc",   f:r=>r.gross===""?"":((n(r.gross)-n(r.tare))/1000).toFixed(3)},
+      {k:"capacity", h:"Truck Capacity (in Tonnes)", t:"calc",   f:r=>TRUCKS[r.truck] ?? ""}
+      // Revenue Rate and Revenue are deliberately not shown here. The sheet
+      // still calculates both from its own formulas; they are simply not
+      // exposed to the person doing data entry.
+    ],
+    kpis:rows=>{
+      const t = rows.reduce((s,r)=>s+(n(r.gross)-n(r.tare))/1000,0);
+      const cap = rows.reduce((s,r)=>s+(TRUCKS[r.truck]||0),0);
+      const trips = rows.filter(r=>r.gross!=="").length;
+      return [["TONNES LIFTED — TODAY",t.toFixed(2)],["TRIPS ENTERED",trips],
+              ["AVG TONNES / TRIP",trips?(t/trips).toFixed(2):"0"],
+              ["CAPACITY UTILIZATION",cap?((t/cap)*100).toFixed(1)+"%":"0%"]];
+    }
+  },
+  fuel:{
+    label:"Fuel & Maintenance Log", sheet:"Fuel & Maintenance Log",
+    cols:[
+      {k:"date",  h:"Date",                     t:"date",   d:()=>today},
+      {k:"month", h:"Month",                    t:"calc",   f:r=>mmm(r.date)},
+      {k:"truck", h:"Truck ID",                 t:"select", o:()=>Object.keys(TRUCKS)},
+      {k:"odo",   h:"Odometer Reading (km)",    t:"number"},
+      {k:"litres",h:"Litres Filled",            t:"number"},
+      {k:"rate",  h:"Rate / Litre",             t:"number"},
+      {k:"cost",  h:"Total Fuel Cost (Rs.)",    t:"costcell"},
+      {k:"type",  h:"Type",                     t:"select", o:()=>FM_TYPES, d:()=>"Fuel"},
+      {k:"desc",  h:"Description / Invoice Ref.",t:"text",  w:220},
+      {k:"client",h:"Client Name",              t:"select", o:()=>Object.keys(CLIENTS)}
+    ],
+    kpis:rows=>{
+      const fuel = rows.filter(r=>r.type==="Fuel");
+      const fc = fuel.reduce((s,r)=>s+n(r.litres)*n(r.rate),0);
+      const rc = rows.filter(r=>r.type!=="Fuel").reduce((s,r)=>s+n(r.cost),0);
+      const l  = fuel.reduce((s,r)=>s+n(r.litres),0);
+      return [["FUEL COST TODAY (Rs.)",rs(fc.toFixed(0))],["REPAIR / MAINT (Rs.)",rs(rc.toFixed(0))],
+              ["LITRES FILLED",l.toFixed(1)],["AVG RATE / LITRE",l?(fc/l).toFixed(2):"0"]];
+    }
+  },
+  cash:{
+    label:"Cash Log", sheet:"Cash Log",
+    cols:[
+      {k:"date",  h:"Date",                      t:"date",   d:()=>today},
+      {k:"type",  h:"Type",                      t:"select", o:()=>CASH_TYPE, d:()=>"Expense"},
+      {k:"truck", h:"Truck ID (optional)",       t:"select", o:()=>TRUCK_OPT, blank:true},
+      {k:"cat",   h:"Category",                  t:"select", o:()=>CASH_CAT},
+      {k:"desc",  h:"Description / Notes",       t:"text",   w:220},
+      {k:"in",    h:"Amount In - Credit (Rs.)",  t:"number"},
+      {k:"out",   h:"Amount Out - Expense (Rs.)",t:"number"},
+      {k:"mode",  h:"Paid By / Mode",            t:"select", o:()=>CASH_MODE},
+      {k:"bal",   h:"Running Balance (Rs.)",     t:"calc",   f:(r,i,rows)=>{
+          let b = OPENING_BALANCE;
+          for(let j=0;j<=i;j++) b += n(rows[j].in)-n(rows[j].out);
+          return r.date===""?"":rs(b.toFixed(2));
+      }},
+      {k:"client",h:"Client Name",               t:"select", o:()=>Object.keys(CLIENTS)}
+    ],
+    kpis:rows=>{
+      const cin = rows.reduce((s,r)=>s+n(r.in),0), cout = rows.reduce((s,r)=>s+n(r.out),0);
+      return [["CREDITED TODAY (Rs.)",rs(cin.toFixed(0))],["SPENT TODAY (Rs.)",rs(cout.toFixed(0))],
+              ["CLOSING BALANCE (Rs.)",rs((OPENING_BALANCE+cin-cout).toFixed(2))]];
+    }
+  }
+};
+
+/* ============================================================
+   3. STATE + RENDER
+   ============================================================ */
+const blank = key => Object.fromEntries(SHEETS[key].cols.map(c=>[c.k, c.d?c.d():""]));
+const data = {trip:[],fuel:[],cash:[]};
+Object.keys(data).forEach(k=>{ for(let i=0;i<3;i++) data[k].push(blank(k)); });
+let active = "trip";
+
+document.getElementById("today").textContent =
+  new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+
+function renderEntry(){
+  renderOverall();
+  const S = SHEETS[active], rows = data[active];
+
+  document.getElementById("kpis").innerHTML = S.kpis(rows)
+    .map(([l,v])=>`<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join("");
+
+  let h = "<table><thead><tr><th class='rownum'>#</th>"
+        + S.cols.map(c=>`<th${c.w?` style="min-width:${c.w}px"`:""}>${c.lab||c.h}</th>`).join("")
+        + "<th class='rownum'></th></tr></thead><tbody>";
+
+  rows.forEach((r,i)=>{
+    h += `<tr><td class="rownum">${i+1}</td>`;
+    S.cols.forEach(c=>{
+      const v = r[c.k] ?? "";
+      if(c.t==="calc"){
+        h += `<td class="calc" data-calc="${i}|${c.k}">${c.f(r,i,rows)}</td>`;
+      } else if(c.t==="costcell"){
+        // auto for Fuel rows, typed for Repair / Maintenance
+        h += r.type==="Fuel"
+           ? `<td class="calc" data-calc="${i}|cost">${r.litres===""?"":rs((n(r.litres)*n(r.rate)).toFixed(2))}</td>`
+           : `<td><input type="text" inputmode="decimal" data-num="1" data-k="cost" data-i="${i}" value="${v}"></td>`;
+      } else if(c.t==="select"){
+        const opts = ["",...c.o()].map(o=>`<option${o===v?" selected":""}>${o}</option>`).join("");
+        h += `<td><select data-k="${c.k}" data-i="${i}">${opts}</select></td>`;
+      } else if(c.t==="date"){
+        // max=today: a trip cannot have happened tomorrow. Amber when backdated,
+        // so an old date left over from the previous row is easy to spot.
+        h += `<td><input type="date" max="${today}"${v && v!==today ? ' class="backdated"' : ''}`
+           + ` data-k="${c.k}" data-i="${i}" value="${v}"></td>`;
+      } else {
+        const num = c.t==="number";
+        h += `<td><input type="text"${num?' inputmode="decimal" data-num="1"':""}`
+           + ` data-k="${c.k}" data-i="${i}" value="${v}"></td>`;
+      }
+    });
+    h += `<td class="rownum"><button class="del" data-del="${i}" title="Delete row">×</button></td></tr>`;
+  });
+
+  document.getElementById("pane").innerHTML = h + "</tbody></table>";
+}
+
+/* Update only the grey calculated cells and the KPI strips. Rebuilding the
+   whole table on each keystroke destroyed the focused input and reset the
+   caret, which reversed typed digits on number fields. */
+function refreshDerived(){
+  const S = SHEETS[active], rows = data[active];
+  document.querySelectorAll('#pane td[data-calc]').forEach(td => {
+    const [i, k] = td.dataset.calc.split('|');
+    const r = rows[+i];
+    if (!r) return;
+    if (k === 'cost'){
+      td.textContent = r.litres === "" ? "" : rs((n(r.litres) * n(r.rate)).toFixed(2));
+    } else {
+      const col = S.cols.find(c => c.k === k);
+      if (col) td.textContent = col.f(r, +i, rows);
+    }
+  });
+  document.getElementById("kpis").innerHTML = S.kpis(rows)
+    .map(([l,v])=>`<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join("");
+}
+
+function renderTabs(){
+  document.getElementById("tabs").innerHTML =
+    Object.entries(SHEETS).map(([k,s])=>{
+      const filled = data[k].filter(rowFilled).length;
+      return `<button class="tab" role="tab" data-tab="${k}" aria-selected="${k===active}">`
+           + `${s.label}${filled?` (${filled})`:""}</button>`;
+    }).join("") + '<div class="spacer"></div>';
+}
+
+const rowFilled = r => Object.values(r).some(
+  v => v!=="" && v!=null && v!=="Fuel" && v!=="Expense" && v!==today);
+
+/* ---- events ---- */
+document.getElementById("pane").addEventListener("input", e=>{
+  const t = e.target;
+  if(!t.dataset.k) return;
+  if (t.dataset.num){
+    const clean = t.value.replace(/[^0-9.\-]/g, '');
+    if (clean !== t.value){
+      const p = t.selectionStart - (t.value.length - clean.length);
+      t.value = clean;
+      try { t.setSelectionRange(p, p); } catch(_){}
+    }
+  }
+  data[active][+t.dataset.i][t.dataset.k] = t.value;
+
+  // Changing Type on the Fuel tab swaps the cost cell between a formula
+  // display and an editable input, so that one case needs a real rebuild.
+  const structural = (active === 'fuel' && t.dataset.k === 'type');
+  if (structural){ renderEntry(); }
+  else { refreshDerived(); }
+  renderTabs();
+});
+document.getElementById("pane").addEventListener("click", e=>{
+  if(e.target.dataset.del!==undefined){
+    data[active].splice(+e.target.dataset.del,1);
+    if(!data[active].length) data[active].push(blank(active));
+    renderEntry(); renderTabs();
+  }
+});
+document.getElementById("tabs").addEventListener("click", e=>{
+  const t = e.target.closest("[data-tab]"); if(!t) return;
+  active = t.dataset.tab; renderEntry(); renderTabs();
+});
+document.getElementById("addRow").onclick  = ()=>{ data[active].push(blank(active)); renderEntry(); renderTabs(); };
+document.getElementById("addFive").onclick = ()=>{ for(let i=0;i<5;i++) data[active].push(blank(active)); renderEntry(); renderTabs(); };
+
+/* ---- submit ---- */
+document.getElementById("submit").onclick = async ()=>{
+  const msg = document.getElementById("msg"), btn = document.getElementById("submit");
+  const filledBy = document.getElementById("filledBy").value.trim();
+  if(!filledBy){ msg.className="msg err"; msg.textContent="Enter your name first."; return; }
+
+  const batchId = 'B' + new Date().toISOString().slice(2,10).replace(/-/g,'')
+                + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+  const payload = {filledBy, batchId, code: ACCESS_CODE,
+                   submittedAt:new Date().toISOString(), blocks:{}};
+  let total = 0;
+  for(const k of Object.keys(SHEETS)){
+    const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
+      const out = {};
+      SHEETS[k].cols.forEach(c=>{
+        const v = c.t==="calc" ? String(c.f(r,i,arr)).replace(/,/g,"")
+                : c.t==="costcell" && r.type==="Fuel" ? (n(r.litres)*n(r.rate)).toFixed(2)
+                : r[c.k];
+        out[c.h] = c.toSheet ? c.toSheet(v) : v;
+      });
+      return out;
+    });
+    payload.blocks[SHEETS[k].sheet] = rows;
+    total += rows.length;
+  }
+  if(!total){ msg.className="msg err"; msg.textContent="Nothing to submit yet."; return; }
+
+  btn.disabled = true; msg.className="msg"; msg.textContent="Sending\u2026";
+
+  /* A no-cors POST cannot read its own reply, so "Submitted" used to be a
+     guess. It was wrong in two cases that matter: a revoked code, where the
+     server refuses and writes nothing, and a dropped connection. Both looked
+     like success.
+
+     So: send, then ASK. action=check counts what the batch actually wrote,
+     and answers authError if the code is no longer valid. Only a confirmed
+     row count clears the grid — anything else keeps the typed rows so they
+     can be sent again. */
+  try {
+    await fetch(ENDPOINT,{method:"POST",mode:"no-cors",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
+  } catch(err){
+    msg.className="msg err";
+    msg.textContent="Send failed — nothing was saved. Check your connection and try again.";
+    btn.disabled = false;
+    return;
+  }
+
+  msg.className = "msg"; msg.textContent = "Saving\u2026";
+
+  let landed = null;
+  for (let attempt = 1; attempt <= 5; attempt++){
+    await new Promise(r => setTimeout(r, attempt === 1 ? 1800 : 2500));
+    let res;
+    try {
+      res = await jsonp('action=check&b=' + encodeURIComponent(batchId));
+    } catch(e){ continue; }                       // network blip: keep asking
+
+    if (res && res.authError){
+      // Refused. Nothing was written, and the page has no business staying open.
+      AUTH_ERROR = res.authError;
+      localStorage.removeItem('bhi_code');
+      localStorage.removeItem('bhi_payload');
+      ACCESS_CODE = '';
+      OVERALL = {};
+      lock(AUTH_ERROR);
+      btn.disabled = false;
+      return;
+    }
+    if (res && res.rows >= total){ landed = res; break; }
+  }
+
+  if (landed){
+    msg.className="msg ok"; msg.textContent = `Saved ${landed.rows} rows.`;
+    Object.keys(data).forEach(k=>{ data[k]=[blank(k),blank(k),blank(k)]; });
+    const tripCount = payload.blocks['Daily Trip Log'].length;
+    renderEntry(); renderTabs();
+    setTimeout(loadOverall, 1500);
+    if (tripCount) showQR(batchId, tripCount);
+  } else {
+    // Rows are deliberately NOT cleared — they may not have been saved.
+    msg.className="msg err";
+    msg.textContent="Could not confirm the save. Your rows are still here — "
+                  + "check the sheet before submitting again.";
+  }
+  btn.disabled = false;
+};
+
+/* ---- all-time totals, read from the sheet's own KPI cells ---- */
+let OVERALL = {};
+let SYNC_FAILED = false;
+
+let LISTS_STAMP = '';
+
+function applyLists(L){
+  if (L.clients && Object.keys(L.clients).length) CLIENTS = L.clients;
+  if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
+  if (L.drivers && L.drivers.length)              DRIVERS = L.drivers;
+  if (L.employees && L.employees.length) EMPLOYEES = L.employees;
+  TRUCK_OPT = (L.costCentres && L.costCentres.length)
+    ? L.costCentres
+    : Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+
+  // If the roster actually changed, redraw so open dropdowns pick it up.
+  const stamp = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  if (stamp !== LISTS_STAMP){
+    LISTS_STAMP = stamp;
+    if (document.getElementById('pane').innerHTML) { renderEntry(); renderTabs(); }
+  }
+}
+
+/* No cached payload is loaded before the code is checked. Showing last-known
+   figures to someone who has not been verified would leak exactly the data
+   the lock exists to protect. */
+
+document.getElementById('rangeSel').onchange = renderOverall;
+/* Refresh re-reads the sheet: dropdown lists (clients, trucks, drivers) and
+   the all-time figures. Typed rows are untouched, so it is safe to press
+   mid-entry — unlike Ctrl+Shift+R, which would discard them.
+
+   Note this pulls DATA. A change to this page's own code still needs a real
+   reload, which is why the button says so when there is nothing to lose. */
+const headBtn = document.getElementById('headRefresh');
+
+function entrySetDot(state){
+  const d = document.getElementById('dot');
+  d.className = 'dot' + (state ? ' ' + state : '');
+  d.title = state === 'busy' ? 'Refreshing' : state === 'off' ? 'Offline' : 'Live';
+}
+
+headBtn.onclick = async () => {
+  const m = document.getElementById('syncMsg');
+  headBtn.disabled = true;
+  entrySetDot('busy');
+  m.style.color = ''; m.textContent = 'Refreshing\u2026';
+
+  const before = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  await loadOverall();
+  const after = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+
+  if (AUTH_ERROR){
+    // loadOverall has already locked the page; nothing more to show here.
+    headBtn.disabled = false;
+    return;
+  }
+  if (SYNC_FAILED){
+    entrySetDot('off');
+    m.style.color = '#d93025';
+    m.textContent = 'Could not reach the sheet';
+  } else {
+    entrySetDot('');
+    m.textContent = before === after ? 'Up to date' : 'Lists updated';
+    setTimeout(() => { m.textContent = ''; }, 6000);
+  }
+  headBtn.disabled = false;
+};
+
+// Figures the entry operator should not see. Filtered here rather than in
+// Apps Script, so the sheet's own dashboards keep showing them.
+const HIDDEN_KPIS = /revenue/i;
+
+function renderOverall(){
+  const byRange = OVERALL[SHEETS[active].sheet] || {};
+  const pairs = (byRange[document.getElementById('rangeSel').value] || [])
+                  .filter(([l]) => !HIDDEN_KPIS.test(l));
+  document.getElementById('overall').innerHTML = pairs.length
+    ? pairs.map(([l,v]) => `<div class="kpi"><b>${l}</b><span>${v}</span></div>`).join('')
+    : `<div class="kpi"><b>ALL-TIME TOTALS</b><span style="font-size:12px;color:#8a8d91">unavailable — check connection</span></div>`;
+}
+
+function showQR(batchId, tripCount){
+  const url = location.origin + location.pathname.replace(/[^/]*$/, '') +
+              'upload.html?b=' + encodeURIComponent(batchId) +
+              (ACCESS_CODE ? '&k=' + encodeURIComponent(ACCESS_CODE) : '');
+  const box = document.getElementById('qrcode');
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createImgTag(6, 8);
+  } catch(e) {
+    box.innerHTML = '<p style="font-size:12px;color:#d93025">QR unavailable — use the link below.</p>';
+  }
+  document.getElementById('qrCount').textContent = tripCount;
+  document.getElementById('qrlink').textContent = url;
+  document.getElementById('qrwrap').hidden = false;
+}
+
+document.getElementById('qrclose').onclick =
+  () => { document.getElementById('qrwrap').hidden = true; };
+
+
+
+/* ============================================================
+   DASHBOARD view
+   ============================================================ */
+
+
+const dashInr = v => Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+
+/* A value is negative if it carries a minus sign anywhere in the display text,
+   which covers "-1,200" and "(1,200)" and "-Rs 1,200" alike. */
+const dashSign = (label, value) => {
+  if (!/profit|margin|balance/i.test(label)) return '';
+  return /-|\(/.test(value) ? 'neg' : 'pos';
+};
+
+function dashCard(label, value){
+  return `<div class="kpi"><b>${esc(label)}</b>
+            <span class="${dashSign(label, value)}">${esc(value)}</span></div>`;
+}
+
+/* ---------- charts, hand-rolled SVG so the page carries no libraries ---------- */
+
+function dashLine(rows, key, colour, fmt){
+  if (rows.length < 2) return '<p class="axis">Not enough months yet.</p>';
+  const W = 640, H = 190, L = 52, R = 12, T = 12, B = 26;
+  const vals = rows.map(r => r[key]);
+  const lo = Math.min(0, ...vals), hi = Math.max(...vals, 1);
+  const x = i => L + i * (W - L - R) / (rows.length - 1);
+  const y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B);
+
+  const ticks = [lo, lo + (hi - lo) / 2, hi];
+  const grid = ticks.map(v =>
+    `<line class="gline" x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/>
+     <text class="axis" x="${L - 7}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`
+  ).join('');
+
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[key]).toFixed(1)}`).join(' ');
+  const area = line + ` L${x(rows.length - 1).toFixed(1)},${y(Math.max(lo,0)).toFixed(1)}`
+                    + ` L${x(0).toFixed(1)},${y(Math.max(lo,0)).toFixed(1)} Z`;
+
+  const dots = rows.map((r, i) =>
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(r[key]).toFixed(1)}" r="3" fill="${colour}">
+       <title>${esc(r.month)}: ${fmt(r[key])}</title></circle>`).join('');
+
+  // Only label every nth month so the axis never collides with itself.
+  const step = Math.ceil(rows.length / 8);
+  const labels = rows.map((r, i) => i % step ? '' :
+    `<text class="axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(r.month)}</text>`
+  ).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">
+    ${grid}
+    <path d="${area}" fill="${colour}" opacity=".08"/>
+    <path d="${line}" fill="none" stroke="${colour}" stroke-width="2"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}${labels}
+  </svg>`;
+}
+
+function dashDonut(items){
+  if (!items.length) return '<p class="axis">No expenses recorded.</p>';
+  const total = items.reduce((s, i) => s + i[1], 0) || 1;
+  const cols = ['#F25505', '#232326', '#8a8a90', '#c9a227'];
+  const C = 100, R = 74, r = 46;
+  let a0 = -Math.PI / 2, paths = '';
+  items.forEach((it, i) => {
+    const a1 = a0 + it[1] / total * Math.PI * 2;
+    const big = (a1 - a0) > Math.PI ? 1 : 0;
+    const p = (rad, ang) => `${(C + rad * Math.cos(ang)).toFixed(2)},${(C + rad * Math.sin(ang)).toFixed(2)}`;
+    paths += `<path d="M${p(R, a0)} A${R},${R} 0 ${big} 1 ${p(R, a1)}
+                       L${p(r, a1)} A${r},${r} 0 ${big} 0 ${p(r, a0)} Z"
+                    fill="${cols[i % cols.length]}"><title>${esc(it[0])}: ${dashInr(it[1])}</title></path>`;
+    a0 = a1;
+  });
+  const legend = items.map((it, i) =>
+    `<div><i style="background:${cols[i % cols.length]}"></i>${esc(it[0])}
+       <em>${(it[1] / total * 100).toFixed(0)}%</em></div>`).join('');
+  return `<svg viewBox="0 0 200 200" role="img" style="max-width:200px;margin:0 auto">${paths}
+    <text x="100" y="96" text-anchor="middle" class="axis" style="font-size:9px">TOTAL</text>
+    <text x="100" y="112" text-anchor="middle" style="font-size:15px;font-weight:650"
+          fill="#232326">${dashInr(total)}</text></svg>
+    <div class="legend">${legend}</div>`;
+}
+
+function dashTable(rows){
+  const head = ['Month','Revenue','Diesel','Repair','Fixed','Cash','Net Profit','Tonnage'];
+  return `<div class="scroll"><table><thead><tr>${
+    head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr>
+      <td>${esc(r.month)}</td><td>${dashInr(r.revenue)}</td><td>${dashInr(r.diesel)}</td>
+      <td>${dashInr(r.repair)}</td><td>${dashInr(r.fixed)}</td><td>${dashInr(r.cash)}</td>
+      <td class="${r.profit < 0 ? 'neg' : 'pos'}">${dashInr(r.profit)}</td>
+      <td>${r.tonnage.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ---------- render ---------- */
+
+const dashValid = d => d && !d.error && Array.isArray(d.blocks);
+
+function renderDash(d){
+  let html = `<p style="font-size:11px;color:var(--muted);margin:0 0 14px">
+      Workbook figures as of ${esc(d.generatedAt)}.</p>`;
+  d.blocks.forEach(b => {
+    if (!b.kpis.length) return;
+    html += `<section>
+      <div class="shead"><h2>${esc(b.title)}</h2><div class="rule"></div>
+        <span class="src">${esc(b.source)}</span></div>
+      <div class="grid">${b.kpis.map(([l, v]) => dashCard(l, v)).join('')}</div>
+    </section>`;
+  });
+
+  if (d.trend.length){
+    html += `<section>
+      <div class="shead"><h2>Monthly Trend</h2><div class="rule"></div>
+        <span class="src">Monthly Summary (calc)</span></div>
+      <div class="charts">
+        <div class="panel"><h3>Net profit by month (Rs.)</h3>
+          ${dashLine(d.trend, 'profit', '#F25505', v => dashInr(v))}</div>
+        <div class="panel"><h3>Expense breakdown</h3>${dashDonut(d.expense)}</div>
+      </div>
+      <div class="charts" style="margin-top:12px">
+        <div class="panel"><h3>Tonnage moved by month</h3>
+          ${dashLine(d.trend, 'tonnage', '#232326', v => v.toFixed(1))}</div>
+        <div class="panel"><h3>Month by month</h3>${dashTable(d.trend)}</div>
+      </div>
+    </section>`;
+  }
+
+  document.getElementById('dashBody').innerHTML = html ||
+    '<div class="state"><b>No data yet</b>The workbook has no figures to show.</div>';
+}
+
+/* ---------- keeping it current ----------
+   A dashboard left open on a phone would otherwise freeze at whatever loaded
+   when it was opened. Three things keep it honest:
+     1. a poll every 5 minutes while the page is actually visible
+     2. an immediate refresh whenever the app is brought back to the foreground
+     3. a footer clock showing how old the figures on screen really are
+   Polling pauses when the page is hidden, so a backgrounded app costs nothing
+   in battery or Apps Script quota. */
+
+const POLL_MS = 5 * 60 * 1000;
+let lastLoaded = 0, timer = null;
+
+function dashSetDot(state){
+  const d = document.getElementById('dot');
+  d.className = 'dot' + (state ? ' ' + state : '');
+  d.title = state === 'busy' ? 'Refreshing' : state === 'off' ? 'Offline' : 'Live';
+}
+
+function dashAge(){
+  if (!lastLoaded) return '';
+  const m = Math.round((Date.now() - lastLoaded) / 60000);
+  return m < 1 ? 'just now' : m === 1 ? '1 min ago' : m + ' min ago';
+}
+
+function dashTick(){
+  const el = document.getElementById('stamp');
+  if (lastLoaded) el.textContent = 'Updated ' + dashAge();
+}
+setInterval(dashTick, 30000);
+
+function dashSchedule(){
+  clearTimeout(timer);
+  if (document.visibilityState === 'visible') {
+    timer = setTimeout(() => loadDash(false), POLL_MS);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') { clearTimeout(timer); return; }
+  // Back in the foreground: anything older than a minute is worth re-reading.
+  if (Date.now() - lastLoaded > 60000) loadDash(false); else dashSchedule();
+});
+
+async function loadDash(force){
+  const stale = document.getElementById('stale');
+  const btn = document.getElementById('reload');
+  const st = document.getElementById('stamp');
+  btn.disabled = true;
+  dashSetDot('busy');
+  // Say what is happening. A colour change alone is easy to miss, and gives
+  // no clue whether anything actually came back.
+  st.textContent = force ? 'Recalculating\u2026' : 'Refreshing\u2026';
+  btn.textContent = 'Working\u2026';
+  try {
+    const d = await jsonp('action=dash' + (force ? '&fresh=1' : ''));
+
+    if (d && d.authError){
+      // Enforced here so every path locks: first load, the Refresh button and
+      // the five-minute poll. Revoking, or narrowing a role to Data entry,
+      // shuts an already-open dashboard on its next contact with the sheet.
+      AUTH_ERROR = d.authError;
+      localStorage.removeItem('bhi_dash');        // never keep figures we cannot show
+      localStorage.removeItem('bhi_dash_code');
+      ACCESS_CODE = '';
+      lastLoaded = 0;
+      btn.disabled = false;
+      lock(AUTH_ERROR);
+      return;
+    }
+    AUTH_ERROR = '';
+
+    // The endpoint answers even when it cannot build a dashboard — for
+    // example if Dashboard.gs is missing from the Apps Script project, or the
+    // deployment is an older version. Caching that reply would poison every
+    // later load, so check the shape before trusting it.
+    if (!dashValid(d)) {
+      // A reply carrying `summary`/`lists` but no `blocks` is the signature of
+      // an endpoint still serving a deployment from before action=dash existed.
+      if (d && (d.summary || d.lists)) {
+        throw new Error('This endpoint is running an older deployment. Copy the ' +
+                        'ENDPOINT value out of index.html into dashboard.html, ' +
+                        'or redeploy a NEW VERSION of the existing deployment.');
+      }
+      throw new Error(d && d.error ? d.error : 'unexpected reply from the endpoint');
+    }
+
+    localStorage.setItem('bhi_dash', JSON.stringify(d));
+    lastLoaded = Date.now();
+    stale.hidden = true;
+    dashSetDot('');
+    renderDash(d);
+    st.textContent = 'Updated just now';
+  } catch (err){
+    dashSetDot('off');
+    let cached = null;
+    try {
+      const raw = localStorage.getItem('bhi_dash');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (dashValid(parsed)) cached = parsed;
+      else localStorage.removeItem('bhi_dash');   // drop a poisoned entry
+    } catch (_){ localStorage.removeItem('bhi_dash'); }
+
+    if (cached){
+      stale.hidden = false;
+      stale.textContent = 'Could not reach the workbook — showing the last figures loaded on this device ('
+                          + cached.generatedAt + ').';
+      renderDash(cached);
+    } else {
+      stale.hidden = true;
+      document.getElementById('dashBody').innerHTML =
+        '<div class="state"><b>Could not load the dashboard</b>' +
+        esc(String(err.message || err)) +
+        '<br><br><span style="font-size:11px">Endpoint in use:<br>' +
+        esc(ENDPOINT.slice(0, 62)) + '…</span></div>';
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = 'Refresh';
+  dashSchedule();
+}
+
+// The button forces a server-side rebuild; the timed poll does not.
+
+document.getElementById('reload').onclick = () => loadDash(true);
+</script>
+
+
+<!-- /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// -->
+
+<!-- <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BHI — Data Entry</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
@@ -743,4 +1923,4 @@ render(); renderTabs();
     lock('offline');
   }
 })();
-</script>
+</script> -->
