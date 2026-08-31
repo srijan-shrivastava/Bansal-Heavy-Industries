@@ -836,6 +836,30 @@ function applyLists(L){
   }
 }
 
+/* Reads the dropdown lists and the sheet's own KPI cells in one call, then
+   draws the grid. This is also the first thing that renders the entry view,
+   so it must run before the operator sees anything. */
+async function loadOverall(){
+  SYNC_FAILED = false;
+  let d;
+  try {
+    d = await jsonp('action=lists');
+  } catch(err){
+    SYNC_FAILED = true;
+    entrySetDot('off');
+    renderEntry(); renderTabs();      // draw the grid anyway, on fallback lists
+    return;
+  }
+
+  if (d && d.authError){ denied(d.authError); return; }
+
+  if (d.lists)   applyLists(d.lists);
+  if (d.summary) OVERALL = d.summary;
+  if (typeof d.openingBalance === 'number') OPENING_BALANCE = d.openingBalance;
+
+  renderEntry(); renderTabs();
+}  
+  
 /* No cached payload is loaded before the code is checked. Showing last-known
    figures to someone who has not been verified would leak exactly the data
    the lock exists to protect. */
