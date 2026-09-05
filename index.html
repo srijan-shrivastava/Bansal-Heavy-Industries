@@ -936,7 +936,7 @@ function applyLists(L){
 /* Reads the dropdown lists and the sheet's own KPI cells in one call, then
    draws the grid. This is also the first thing that renders the entry view,
    so it must run before the operator sees anything. */
-async function loadOverall(){
+async function loadOverall(force){
   SYNC_FAILED = false;
   let d;
   try {
