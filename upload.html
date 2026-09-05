@@ -8,6 +8,9 @@
   :root{
     --dark:#232326; --orange:#F25505; --grid:#e2e3e3; --head:#f8f9fa;
     --txt:#202124; --muted:#5f6368; --green:#0f9d58; --red:#d93025;
+    /* Slate for the cash badge. Green and red are already spoken for by the
+       uploaded and failed states, so a status colour here would misread. */
+    --slate:#44606f;
   }
   [hidden]{display:none!important}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -36,7 +39,10 @@
   .chead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--grid)}
   .truck{background:var(--dark);color:#fff;font-weight:700;font-size:12px;
          padding:4px 9px;border-radius:5px;white-space:nowrap}
-  .truck.log{background:var(--orange)}
+  /* One colour per kind, so FUEL and CASH are distinguishable at a glance:
+     charcoal = a truck (trip cards), orange = fuel, slate = cash. */
+  .truck.fuel{background:var(--orange)}
+  .truck.cash{background:var(--slate)}
   .meta{flex:1;min-width:0}
   .meta .l1{font-weight:600;font-size:14px}
   .meta .l2{font-size:12px;color:var(--muted);margin-top:1px}
@@ -352,7 +358,7 @@ function logCard(c){
   return `
     <div class="card ${has ? 'done' : ''}" data-log="${esc(c.key)}">
       <div class="chead">
-        <span class="truck log">${esc(c.tag)}</span>
+        <span class="truck ${esc(c.tab)}">${esc(c.tag)}</span>
         <div class="meta">
           <div class="l1">${esc(c.label)} &middot; ${esc(c.shown)}</div>
           <div class="l2">${c.count} entr${c.count === 1 ? 'y' : 'ies'}${c.date ? ' · ' + esc(c.date) : ''}</div>
