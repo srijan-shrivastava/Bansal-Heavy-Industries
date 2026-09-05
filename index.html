@@ -556,6 +556,21 @@ const today = new Date().toISOString().slice(0,10);
 const mmm = d => d ? new Date(d+"T00:00:00")
       .toLocaleDateString("en-GB",{month:"short",year:"numeric"}).replace(" ","-") : "";
 const n = v => parseFloat(v)||0;
+
+/* Month string for columns the FORM writes into the sheet.
+
+   mmm() above uses toLocaleDateString, which renders September as 'Sept' in
+   en-GB — four letters, where the sheet's own TEXT(date,"mmm-yyyy") gives
+   'Sep'. Everywhere else the sheet computes Month itself so the difference
+   never showed. Daily Attendance now sends it, so it has to match exactly or
+   September splits into two groups in every month-based SUMIFS. */
+const MON3 = ["Jan","Feb","Mar","Apr","May","Jun",
+              "Jul","Aug","Sep","Oct","Nov","Dec"];
+const mmmSheet = d => {
+  if (!d) return "";
+  const p = String(d).split("-");
+  return p.length < 2 ? "" : MON3[(+p[1]) - 1] + "-" + p[0];
+};
 const rs = v => v===""||v==null ? "" : Number(v).toLocaleString("en-IN",{maximumFractionDigits:2});
 
 const SHEETS = {
@@ -644,6 +659,8 @@ const SHEETS = {
     label:"Daily Attendance", sheet:"Daily Attendance",
     cols:[
       {k:"date",   h:"Date",          t:"date",   d:()=>today},
+      // Sent by the form, not calculated by the sheet — see mmmSheet.
+      {k:"month",  h:"Month",         t:"calc",   f:r=>mmmSheet(r.date)},
       {k:"name",   h:"Employee Name", t:"select", o:()=>EMPLOYEES},
       {k:"desig",  h:"Designation",   t:"calc",   f:r=>EMP_ROLE[r.name]||""},
       {k:"status", h:"Status",        t:"select", o:()=>ATT_STATUS},
