@@ -991,6 +991,21 @@ headBtn.onclick = async () => {
 const HIDDEN_KPIS = /revenue/i;
 
 function renderOverall(){
+  /* Attendance has no all-time strip. buildSummary() covers the three money
+     logs only, so this tab would otherwise show a permanent "unavailable —
+     check connection", which reads as a fault rather than a deliberate
+     omission. The label bar goes with it: hiding the KPI strip alone would
+     leave the range dropdown floating above the grid with nothing under it.
+
+     Hidden, not removed — so the chosen range survives a trip through this
+     tab and is still selected on the way back. */
+  const strip = document.getElementById('overall');
+  const bar   = strip.previousElementSibling;      // 'All-Time Totals' + range
+  const off   = (active === 'attend');
+  strip.hidden = off;
+  bar.hidden   = off;
+  if (off) return;
+
   const byRange = OVERALL[SHEETS[active].sheet] || {};
   const pairs = (byRange[document.getElementById('rangeSel').value] || [])
                   .filter(([l]) => !HIDDEN_KPIS.test(l));
