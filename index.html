@@ -58,10 +58,26 @@
   .lockbox h2{font-size:15px;margin:0 0 6px;font-weight:600}
   .lockbox p{font-size:12px;color:var(--muted);margin:0 0 18px;min-height:34px;line-height:1.5}
   .lockbox p.err{color:var(--neg)}
-  .lockbox input{width:100%;height:44px;font-size:20px;text-align:center;
-       letter-spacing:6px;border:1px solid var(--line);border-radius:6px;
-       margin-bottom:12px;background:#fff;font-family:inherit}
-  .lockbox input:focus{outline:none;border-color:var(--accent)}
+  /* Plain white field. The old one forced 6px letter-spacing, which on a
+     masked field pushed the dots off-centre and made a 12-digit code
+     overflow the box. */
+  .lockbox input[type=password],
+  .lockbox input[type=text]{width:100%;height:46px;font-size:19px;
+       text-align:center;border:1px solid var(--line);border-radius:6px;
+       margin-bottom:10px;background:#fff;font-family:inherit;color:var(--ink);
+       transition:border-color .15s}
+  .lockbox input[type=password]{letter-spacing:8px}   /* dots read better spaced */
+  .lockbox input[type=text]{letter-spacing:4px}
+  .lockbox input[type=password]:focus,
+  .lockbox input[type=text]:focus{outline:none;border-color:var(--accent)}
+
+  /* Reveal toggle. Left-aligned under the field so it reads as a control on
+     the input rather than a second action next to Unlock. */
+  .lockbox .reveal{display:flex;align-items:center;gap:7px;font-size:12px;
+       color:var(--muted);margin:0 0 16px;cursor:pointer;user-select:none}
+  .lockbox .reveal input{width:14px;height:14px;margin:0;flex:none;
+       accent-color:var(--accent);cursor:pointer}
+  .lockbox .reveal:hover{color:var(--ink)}
   .lockbox button{width:100%;padding:11px;font:inherit;font-weight:700;
        background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer}
   .lockbox button:disabled{opacity:.5;cursor:default}
@@ -291,8 +307,9 @@
     <img class="logo" src="logo-wordmark.png" alt="Bansal Heavy Industries">
     <h2>Enter your access code</h2>
     <p id="lockMsg">Ask the office if you do not have one.</p>
-    <input id="lockCode" type="text" inputmode="numeric" autocomplete="off"
-           maxlength="12" placeholder="\u2022\u2022\u2022\u2022">
+    <input id="lockCode" type="password" inputmode="numeric"
+           autocomplete="off" maxlength="12" aria-label="Access code">
+    <label class="reveal"><input type="checkbox" id="lockShow">Show code</label>
     <button id="lockGo">Unlock</button>
   </div>
 </div>
@@ -376,6 +393,10 @@ function lock(reason){
   document.getElementById('views').hidden = true;
   document.getElementById('viewTitle').hidden = true;
   i.value = '';
+  // Re-mask on every lock. Leaving the toggle ticked from a failed attempt
+  // would show the next code in the open.
+  i.type = 'password';
+  document.getElementById('lockShow').checked = false;
   setTimeout(() => i.focus(), 50);
 }
 
@@ -463,6 +484,17 @@ document.getElementById('lockGo').onclick = async () => {
 document.getElementById('lockCode').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('lockGo').click();
 });
+
+/* Show / hide the code. Switching the input type moves the caret to the start
+   on most browsers, so the position is captured and restored — otherwise
+   ticking the box mid-entry sends the next digit to the front of the code. */
+document.getElementById('lockShow').onchange = e => {
+  const i = document.getElementById('lockCode');
+  const at = i.selectionStart;
+  i.type = e.target.checked ? 'text' : 'password';
+  i.focus();
+  try { i.setSelectionRange(at, at); } catch(_){}
+};
 
 /* ---------- boot ---------- */
 
@@ -824,12 +856,19 @@ function applyLists(L){
   if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
   if (L.drivers && L.drivers.length)              DRIVERS = L.drivers;
   if (L.employees && L.employees.length) EMPLOYEES = L.employees;
-  TRUCK_OPT = (L.costCentres && L.costCentres.length)
-    ? L.costCentres
-    : Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
 
-  // If the roster actually changed, redraw so open dropdowns pick it up.
-  const stamp = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  /* The Cash tab's Truck ID tracks the TRUCK MASTER, like the other two tabs.
+     It used to prefer L.costCentres, which getLists() reads from J2:J27 of
+     'Settings & Fixed Costs' — a separate list from the Truck Master. So
+     anything sitting in column J silently replaced the truck list here, and
+     adding a truck to the master never reached this dropdown. */
+  TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
+
+  /* Redraw when the roster changes. Whole objects, not just their keys: a
+     revenue-rate or truck-capacity edit changes no key, so the old
+     key-only comparison missed it and the Truck Capacity column kept showing
+     the stale figure until something else forced a render. */
+  const stamp = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
   if (stamp !== LISTS_STAMP){
     LISTS_STAMP = stamp;
     if (document.getElementById('pane').innerHTML) { renderEntry(); renderTabs(); }
@@ -858,8 +897,8 @@ async function loadOverall(){
   if (typeof d.openingBalance === 'number') OPENING_BALANCE = d.openingBalance;
 
   renderEntry(); renderTabs();
-}  
-  
+}
+
 /* No cached payload is loaded before the code is checked. Showing last-known
    figures to someone who has not been verified would leak exactly the data
    the lock exists to protect. */
@@ -885,9 +924,9 @@ headBtn.onclick = async () => {
   entrySetDot('busy');
   m.style.color = ''; m.textContent = 'Refreshing\u2026';
 
-  const before = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  const before = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
   await loadOverall();
-  const after = JSON.stringify([Object.keys(CLIENTS), Object.keys(TRUCKS), DRIVERS]);
+  const after = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
 
   if (AUTH_ERROR){
     // loadOverall has already locked the page; nothing more to show here.
