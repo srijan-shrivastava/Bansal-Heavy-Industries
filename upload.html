@@ -1,8 +1,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BHI — Trip Documents</title>
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="dash-favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="dash-icon-192.png">
 <meta name="theme-color" content="#232326">
 <style>
   :root{
@@ -23,12 +23,20 @@
   .track{height:4px;background:var(--grid);border-radius:2px;margin-top:7px;overflow:hidden}
   .track i{display:block;height:100%;background:var(--green);width:0;transition:width .25s}
 
+  /* Section heading between the trip cards and the two log cards, so it is
+     obvious these are a different kind of upload and not another trip. */
+  .sectionhead{font-size:11px;letter-spacing:.9px;text-transform:uppercase;
+        color:var(--muted);font-weight:700;padding:18px 16px 4px}
+  .sectionhead span{display:block;font-size:11.5px;letter-spacing:0;
+        text-transform:none;font-weight:400;margin-top:3px;line-height:1.45}
+
   .card{background:#fff;margin:10px;border-radius:10px;overflow:hidden;
         box-shadow:0 1px 3px rgba(0,0,0,.12)}
   .card.done{box-shadow:0 0 0 2px var(--green),0 1px 3px rgba(0,0,0,.12)}
   .chead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--grid)}
   .truck{background:var(--dark);color:#fff;font-weight:700;font-size:12px;
          padding:4px 9px;border-radius:5px;white-space:nowrap}
+  .truck.log{background:var(--orange)}
   .meta{flex:1;min-width:0}
   .meta .l1{font-weight:600;font-size:14px}
   .meta .l2{font-size:12px;color:var(--muted);margin-top:1px}
@@ -123,8 +131,31 @@ let ACCESS_CODE = QS.get('k') || localStorage.getItem('bhi_code') || '';
 if (QS.get('k')) {
   try { localStorage.setItem('bhi_code', QS.get('k')); } catch (_) {}
 }
-let TRIPS = [];                 // rows from the sheet
-const SHOTS = {};               // rowNumber -> [{id, dataUrl, name}]
+let TRIPS = [];                 // Daily Trip Log rows from the sheet
+const SHOTS = {};               // card key -> [{id, dataUrl, name}]
+
+/* The two whole-tab uploads. Unlike trips, these are not per row: a batch may
+   have twelve cash entries but they share one card and one PDF, because the
+   paperwork behind them (a fuel bill, a bundle of receipts) is filed as one
+   document. Populated from action=batch; `count` is how many rows the batch
+   wrote to that sheet, `pdfUrl` is set once it has been filed.
+
+   Keys are prefixed 'L:' so SHOTS can hold trips (numeric rows) and logs in
+   the same object without a collision. */
+const LOGS = {
+  fuel: { key: 'L:fuel', tag: 'FUEL',
+          label: 'Fuel & Maintenance Log',
+          hint: 'Fuel bills, repair invoices, parts receipts',
+          count: 0, date: '', pdfUrl: '' },
+  cash: { key: 'L:cash', tag: 'CASH',
+          label: 'Cash Log',
+          hint: 'Cash receipts, toll slips, batta acknowledgements',
+          count: 0, date: '', pdfUrl: '' }
+};
+const LOG_KEYS = ['fuel', 'cash'];
+
+/** The log cards that this batch actually needs: no rows means no card. */
+const activeLogs = () => LOG_KEYS.filter(k => LOGS[k].count > 0);
 
 /* ---------- fetch the batch ---------- */
 /* JSONP with a timeout that does not leave a landmine behind.
@@ -157,6 +188,17 @@ function jsonp(params){
   });
 }
 
+/** Copy the server's view of the two log tabs onto LOGS. */
+function applyLogs(res){
+  const src = (res && res.logs) || {};
+  LOG_KEYS.forEach(k => {
+    const s = src[k] || {};
+    LOGS[k].count  = Number(s.count || 0);
+    LOGS[k].date   = s.date || '';
+    LOGS[k].pdfUrl = s.pdfUrl || '';
+  });
+}
+
 async function load(){
   if (!BATCH){
     document.getElementById('list').innerHTML =
@@ -181,20 +223,28 @@ async function load(){
      looking in the wrong place entirely. */
   try{
     TRIPS = (res && res.trips) || [];
-    if (!TRIPS.length){
+    applyLogs(res);
+
+    /* A batch with no trips can still carry fuel or cash rows — somebody
+       logging a diesel fill on a day nothing moved. So "nothing to do" now
+       means no trips AND no log rows, not simply no trips. */
+    if (!TRIPS.length && !activeLogs().length){
       document.getElementById('list').innerHTML =
-        `<div class="state"><h2>No trips found</h2>
-         This batch has no Daily Trip Log entries, or the link has expired.</div>`;
+        `<div class="state"><h2>No entries found</h2>
+         This batch has no log entries, or the link has expired.</div>`;
       document.getElementById('sub').textContent = BATCH;
       return;
     }
+
+    const stamp = (TRIPS[0] && TRIPS[0].date) ||
+                  LOGS.fuel.date || LOGS.cash.date || '';
     document.getElementById('sub').textContent =
-      TRIPS[0].date + ' · ' + (res.filledBy || '') + ' · ' + BATCH;
+      [stamp, res.filledBy || '', BATCH].filter(Boolean).join(' · ');
 
     /* Re-scanning a finished QR used to reopen the cards, which invited
-       re-uploading over documents already filed. A batch where every trip has
-       a PDF is closed: say so plainly and offer nothing to tap. */
-    if (TRIPS.every(t => t.photoUrl)){
+       re-uploading over documents already filed. A batch is closed when every
+       trip AND every log card it needs has been filed. */
+    if (allFiled()){
       showClosed(res);
       return;
     }
@@ -209,9 +259,14 @@ async function load(){
   }
 }
 
+/** Every trip filed and every log tab that has rows filed. */
+const allFiled = () =>
+  TRIPS.every(t => t.photoUrl) && activeLogs().every(k => LOGS[k].pdfUrl);
+
 /** This batch is finished. Nothing to add, nothing to overwrite. */
 function showClosed(res){
   const trucks = [...new Set(TRIPS.map(t => t.truck).filter(Boolean))].join(', ');
+  const date = (TRIPS[0] && TRIPS[0].date) || LOGS.fuel.date || LOGS.cash.date || '';
   document.getElementById('prog').hidden = true;
   document.getElementById('bar').hidden = true;
   document.getElementById('list').innerHTML = `
@@ -220,59 +275,109 @@ function showClosed(res){
       <h2>Already uploaded</h2>
       <p>Documents for this batch were filed and cannot be changed here.</p>
       <div class="facts">
-        <div><b>${TRIPS.length}</b> trip${TRIPS.length > 1 ? 's' : ''}</div>
-        <div><b>${esc(TRIPS[0].date)}</b></div>
+        ${TRIPS.length ? `<div><b>${TRIPS.length}</b> trip${TRIPS.length > 1 ? 's' : ''}</div>` : ''}
+        ${activeLogs().map(k =>
+          `<div><b>${LOGS[k].count}</b> ${esc(LOGS[k].label)} row${LOGS[k].count > 1 ? 's' : ''}</div>`
+        ).join('')}
+        ${date ? `<div><b>${esc(date)}</b></div>` : ''}
         ${trucks ? `<div><b>${esc(trucks)}</b></div>` : ''}
         ${res && res.filledBy ? `<div>entered by <b>${esc(res.filledBy)}</b></div>` : ''}
       </div>
       <p class="small">If a photo needs replacing, ask the office &mdash; the
-         file is in Drive under this trip's date and truck.</p>
+         file is in Drive under this batch's date.</p>
     </div>`;
 }
 
 /* ---------- render ---------- */
+
+/** The photo strip / done line shared by trip cards and log cards. */
+function shotStrip(cardKey, filedUrl){
+  if (filedUrl){
+    /* Done. No link — he has no access to the Drive folder, so offering one
+       is a dead end. No picker either: these documents are filed, and
+       re-adding would only overwrite them. */
+    return `<div class="doneline">Documents uploaded</div>`;
+  }
+  const shots = SHOTS[cardKey] || [];
+  return `<div class="shots">
+    ${shots.map(s => `
+      <div class="thumb${s.pending ? ' pending' : ''}${s.failed ? ' failed' : ''}">
+        <img src="${s.dataUrl}" alt="">
+        <em>${s.pending ? 'saving\u2026'
+              : s.failed ? 'failed'
+              : Math.round((s.bytes || 0) / 1024) + 'KB'}</em>
+        <button data-del="${s.id}" data-card="${cardKey}" aria-label="Remove">×</button>
+      </div>`).join('')}
+    <button class="add" data-add="${cardKey}"><span>+</span>Add photo</button>
+  </div>`;
+}
+
+const cardTick = (filedUrl, cardKey) =>
+  filedUrl ? '✓' : ((SHOTS[cardKey] || []).length ? '●' : '○');
+
+function tripCard(t){
+  const key = String(t.row);
+  const has = t.photoUrl || (SHOTS[key] || []).length;
+  return `
+    <div class="card ${has ? 'done' : ''}" data-row="${t.row}">
+      <div class="chead">
+        <span class="truck">${esc(t.truck || '—')}</span>
+        <div class="meta">
+          <div class="l1">Trip ${esc(t.tripNo || '?')} · Slip ${esc(t.slip || '—')}</div>
+          <div class="l2">${esc(t.client || '')} · ${esc(t.shift || '')} · ${esc(t.tonnes || '')} t</div>
+        </div>
+        <span class="tick">${cardTick(t.photoUrl, key)}</span>
+      </div>
+      ${shotStrip(key, t.photoUrl)}
+    </div>`;
+}
+
+function logCard(k){
+  const L = LOGS[k];
+  const has = L.pdfUrl || (SHOTS[L.key] || []).length;
+  return `
+    <div class="card ${has ? 'done' : ''}" data-log="${k}">
+      <div class="chead">
+        <span class="truck log">${esc(L.tag)}</span>
+        <div class="meta">
+          <div class="l1">${esc(L.label)}</div>
+          <div class="l2">${L.count} entr${L.count === 1 ? 'y' : 'ies'}${L.date ? ' · ' + esc(L.date) : ''}</div>
+        </div>
+        <span class="tick">${cardTick(L.pdfUrl, L.key)}</span>
+      </div>
+      ${shotStrip(L.key, L.pdfUrl)}
+    </div>`;
+}
+
 function render(){
   const list = document.getElementById('list');
-  list.innerHTML = TRIPS.map(t => {
-    const shots = SHOTS[t.row] || [];
-    return `
-      <div class="card ${(shots.length || t.photoUrl) ? 'done' : ''}" data-row="${t.row}">
-        <div class="chead">
-          <span class="truck">${esc(t.truck || '—')}</span>
-          <div class="meta">
-            <div class="l1">Trip ${esc(t.tripNo || '?')} · Slip ${esc(t.slip || '—')}</div>
-            <div class="l2">${esc(t.client || '')} · ${esc(t.shift || '')} · ${esc(t.tonnes || '')} t</div>
-          </div>
-          <span class="tick">${t.photoUrl ? '✓' : (shots.length ? '●' : '○')}</span>
-        </div>
-        ${t.photoUrl
-          /* Done. No link — he has no access to the Drive folder, so offering
-             one is a dead end. No picker either: this trip's documents are
-             filed, and re-adding would only overwrite them. */
-          ? `<div class="doneline">Documents uploaded</div>`
-          : `<div class="shots">
-          ${shots.map(s => `
-            <div class="thumb${s.pending ? ' pending' : ''}${s.failed ? ' failed' : ''}">
-              <img src="${s.dataUrl}" alt="">
-              <em>${s.pending ? 'saving\u2026'
-                    : s.failed ? 'failed'
-                    : Math.round((s.bytes || 0) / 1024) + 'KB'}</em>
-              <button data-del="${s.id}" data-row="${t.row}" aria-label="Remove">×</button>
-            </div>`).join('')}
-          <button class="add" data-add="${t.row}"><span>+</span>Add photo</button>
-        </div>`}
-      </div>`;
-  }).join('') +
-  `<input type="file" id="picker" accept="image/*" capture="environment" multiple>`;
+  const logs = activeLogs();
 
-  const uploaded = TRIPS.filter(t => t.photoUrl).length;
-  const allDone = uploaded === TRIPS.length;
+  /* Trips first, then the two whole-tab cards under their own heading. The
+     order is deliberate: trip paperwork is the part that must not be missed,
+     so it sits above the fold and the log cards follow. */
+  let html = TRIPS.map(tripCard).join('');
+  if (logs.length){
+    html += `<div class="sectionhead">Bills &amp; receipts
+      <span>One PDF per tab, covering the whole day. Add every bill and
+        receipt behind these entries.</span></div>`
+      + logs.map(logCard).join('');
+  }
+  list.innerHTML = html +
+    `<input type="file" id="picker" accept="image/*" capture="environment" multiple>`;
 
-  const done = TRIPS.filter(t => t.photoUrl || (SHOTS[t.row] || []).length).length;
-  const total = TRIPS.reduce((s, t) => s + (SHOTS[t.row] || []).length, 0);
+  /* Progress counts trips and log cards together, so "6 of 8" means the
+     operator has six of the eight things this batch needs. */
+  const cards = TRIPS.map(t => ({ key: String(t.row), filed: !!t.photoUrl }))
+    .concat(logs.map(k => ({ key: LOGS[k].key, filed: !!LOGS[k].pdfUrl })));
+
+  const done = cards.filter(c => c.filed || (SHOTS[c.key] || []).length).length;
+  const total = cards.reduce((s, c) => s + (SHOTS[c.key] || []).length, 0);
+  const allDone = cards.every(c => c.filed);
+
   document.getElementById('prog').hidden = false;
 
-  // Every trip filed: nothing left to do on this batch, so the button goes.
+  // Everything filed: nothing left to do on this batch, so the button goes.
   document.getElementById('bar').hidden = allDone;
   if (allDone){
     list.insertAdjacentHTML('beforeend',
@@ -284,14 +389,16 @@ function render(){
      to set #pTotal — which by then was null, and the thrown error surfaced as
      a bogus "check your internet connection". */
   document.getElementById('progText').innerHTML = allDone
-    ? '<b>All ' + TRIPS.length + '</b> trip' + (TRIPS.length > 1 ? 's' : '') + ' uploaded'
-    : '<b>' + done + '</b> of <b>' + TRIPS.length + '</b> trips have photos';
+    ? '<b>All ' + cards.length + '</b> uploaded'
+    : '<b>' + done + '</b> of <b>' + cards.length + '</b> have photos';
   document.getElementById('pShots').textContent = total ? total + ' photo' + (total > 1 ? 's' : '') : '';
-  document.getElementById('pBar').style.width = (done / TRIPS.length * 100) + '%';
+  document.getElementById('pBar').style.width =
+    (cards.length ? done / cards.length * 100 : 0) + '%';
+
   // Uploading while a photo is still compressing would send it without its
   // bytes, so the button waits.
-  const ready = TRIPS.reduce((s, t) =>
-    s + (SHOTS[t.row] || []).filter(x => !x.pending && !x.failed).length, 0);
+  const ready = cards.reduce((s, c) =>
+    s + (SHOTS[c.key] || []).filter(x => !x.pending && !x.failed).length, 0);
   const btn = document.getElementById('send');
   if (allDone) return;
   btn.disabled = !ready || busy > 0;
@@ -310,7 +417,7 @@ const esc = s => String(s == null ? '' : s)
    1. WRONG ROW. `pickRow` was a module variable read AFTER the await inside
       the change handler. Tapping "Add photo" on the next trip while the last
       one was still compressing overwrote it, so the photo landed on the
-      wrong card. The row is now stamped on the input element and read
+      wrong card. The card key is now stamped on the input element and read
       synchronously, before anything can yield.
 
    2. NOTHING APPEARS. Compressing a 12MP photo takes a second or two on a
@@ -332,15 +439,15 @@ document.addEventListener('click', e => {
   if (add){
     const p = document.getElementById('picker');
     p.value = '';
-    p.dataset.row = add.dataset.row || add.dataset.add;   // stamped, not shared
+    p.dataset.card = add.dataset.add;        // stamped, not shared
     p.click();
     return;
   }
   const del = e.target.closest('[data-del]');
   if (del){
-    const row = del.dataset.row;
-    SHOTS[row] = (SHOTS[row] || []).filter(s => s.id !== del.dataset.del);
-    if (!SHOTS[row].length) delete SHOTS[row];
+    const card = del.dataset.card;
+    SHOTS[card] = (SHOTS[card] || []).filter(s => s.id !== del.dataset.del);
+    if (!SHOTS[card].length) delete SHOTS[card];
     render();
   }
 });
@@ -349,9 +456,9 @@ document.addEventListener('change', async e => {
   if (e.target.id !== 'picker') return;
 
   // Read both BEFORE any await — the input is reused for the next tap.
-  const row = e.target.dataset.row;
+  const card = e.target.dataset.card;
   const files = [...e.target.files];
-  if (!row || !files.length) return;
+  if (!card || !files.length) return;
 
   // Placeholders first, so the tap has a visible result immediately.
   const pending = files.map(f => {
@@ -361,7 +468,7 @@ document.addEventListener('change', async e => {
       dataUrl: URL.createObjectURL(f),   // the camera file, shown as-is
       pending: true, bytes: f.size
     };
-    (SHOTS[row] = SHOTS[row] || []).push(item);
+    (SHOTS[card] = SHOTS[card] || []).push(item);
     return { item: item, file: f };
   });
   busy += pending.length;
@@ -506,7 +613,7 @@ async function shrink(file){
   };
 }
 
-/* ---------- build one PDF per trip, upload each to Drive ---------- */
+/* ---------- build the PDFs, upload each to Drive ---------- */
 
 const binToB64 = bin => {
   let out = '', chunk = 0x8000;
@@ -517,15 +624,24 @@ const binToB64 = bin => {
   return btoa(out);
 };
 
+/** Shared page builder. `caption` is stamped on every page. */
+function pdfFrom(shots, caption){
+  return binToB64(buildPdfFromJpegs(shots.map(s => ({
+    bin: s.bin, w: s.w, h: s.h, caption: caption
+  }))));
+}
+
 function pdfForTrip(trip, shots){
-  const images = shots.map(s => ({
-    bin: s.bin,
-    w: s.w, h: s.h,
-    caption: [trip.truck, 'Trip ' + (trip.tripNo || '?'),
-              'Slip ' + (trip.slip || '-'), trip.date,
-              trip.client].filter(Boolean).join('  |  ')
-  }));
-  return binToB64(buildPdfFromJpegs(images));
+  return pdfFrom(shots, [trip.truck, 'Trip ' + (trip.tripNo || '?'),
+                         'Slip ' + (trip.slip || '-'), trip.date,
+                         trip.client].filter(Boolean).join('  |  '));
+}
+
+function pdfForLog(k, shots){
+  const L = LOGS[k];
+  return pdfFrom(shots, [L.label, L.date,
+                         L.count + ' entr' + (L.count === 1 ? 'y' : 'ies'),
+                         BATCH].filter(Boolean).join('  |  '));
 }
 
 function post(body){
@@ -540,83 +656,119 @@ function post(body){
 document.getElementById('send').onclick = async () => {
   const btn = document.getElementById('send'), note = document.getElementById('note');
   // Drop anything still compressing or broken; only complete photos go up.
-  Object.keys(SHOTS).forEach(r => {
-    SHOTS[r] = SHOTS[r].filter(x => x.bin && !x.pending && !x.failed);
-    if (!SHOTS[r].length) delete SHOTS[r];
+  Object.keys(SHOTS).forEach(c => {
+    SHOTS[c] = SHOTS[c].filter(x => x.bin && !x.pending && !x.failed);
+    if (!SHOTS[c].length) delete SHOTS[c];
   });
-  const rows = Object.keys(SHOTS).filter(r => SHOTS[r].length);
-  if (!rows.length) return;
+
+  /* One job per PDF: a trip row, or a whole log tab. Building the queue up
+     front means the progress counter is honest about how many uploads are
+     coming, and each job is independent — a failure part way through leaves
+     the finished ones filed and the rest still on the phone. */
+  const jobs = [];
+  TRIPS.forEach(t => {
+    const key = String(t.row);
+    if (!t.photoUrl && (SHOTS[key] || []).length){
+      jobs.push({ type: 'trip', key: key, trip: t,
+                  name: 'Trip ' + (t.tripNo || t.row) });
+    }
+  });
+  activeLogs().forEach(k => {
+    const key = LOGS[k].key;
+    if (!LOGS[k].pdfUrl && (SHOTS[key] || []).length){
+      jobs.push({ type: 'log', key: key, log: k, name: LOGS[k].label });
+    }
+  });
+  if (!jobs.length) return;
 
   btn.disabled = true;
   note.className = 'note';
 
   let sent = 0;
-  for (const row of rows){
-    const trip = TRIPS.find(t => String(t.row) === String(row)) || { row: Number(row) };
-    note.textContent = 'Building PDF ' + (sent + 1) + ' of ' + rows.length + '\u2026';
+  for (const job of jobs){
+    const shots = SHOTS[job.key];
+    note.textContent = 'Building PDF ' + (sent + 1) + ' of ' + jobs.length + '\u2026';
     let pdfB64;
     try {
-      pdfB64 = pdfForTrip(trip, SHOTS[row]);
+      pdfB64 = job.type === 'trip'
+        ? pdfForTrip(job.trip, shots)
+        : pdfForLog(job.log, shots);
     } catch (err){
       note.className = 'note err';
-      note.textContent = 'Could not build the PDF for trip ' + (trip.tripNo || row) + '.';
+      note.textContent = 'Could not build the PDF for ' + job.name + '.';
       btn.disabled = false;
       return;
     }
 
-    note.textContent = 'Uploading ' + (sent + 1) + ' of ' + rows.length +
+    note.textContent = 'Uploading ' + (sent + 1) + ' of ' + jobs.length +
                        ' (' + (pdfB64.length / 1398101).toFixed(1) + ' MB)\u2026';
     try {
-      // One request per trip keeps each well under Apps Script's size cap.
-      await post({
-        kind: 'photos',
-        batchId: BATCH,
-        row: Number(row),
-        pages: SHOTS[row].length,
-        trip: trip,
-        pdfBase64: pdfB64
-      });
+      // One request per PDF keeps each well under Apps Script's size cap.
+      await post(job.type === 'trip'
+        ? { kind: 'photos', batchId: BATCH, row: Number(job.key),
+            pages: shots.length, trip: job.trip, pdfBase64: pdfB64 }
+        : { kind: 'logphotos', batchId: BATCH, log: job.log,
+            pages: shots.length, pdfBase64: pdfB64 });
       sent++;
     } catch (err){
       note.className = 'note err';
-      note.textContent = 'Upload failed at trip ' + (trip.tripNo || row) +
+      note.textContent = 'Upload failed at ' + job.name +
                          '. Reconnect and tap Upload again.';
       btn.disabled = false;
       return;
     }
   }
 
-  // no-cors gives no response, so confirm by re-reading the batch. Drive
-  // writes can lag a few seconds, so poll rather than checking once.
-  let saved = 0, res = null;
+  /* no-cors gives no response, so confirm by re-reading the batch. Drive
+     writes can lag a few seconds, so poll rather than checking once. The
+     target is the set of jobs we just sent: each is filed when its own row
+     or log card comes back carrying a URL. */
+  const wanted = jobs.map(j => j.key);
+  let saved = [], res = null;
+
+  const filedKeys = r => {
+    const out = [];
+    (r.trips || []).forEach(t => { if (t.photoUrl) out.push(String(t.row)); });
+    LOG_KEYS.forEach(k => {
+      if (r.logs && r.logs[k] && r.logs[k].pdfUrl) out.push(LOGS[k].key);
+    });
+    return out;
+  };
+
   for (let attempt = 1; attempt <= 6; attempt++){
     note.className = 'note';
     note.textContent = 'Saving to Drive, checking\u2026';
     await new Promise(r => setTimeout(r, attempt === 1 ? 3000 : 4000));
     try {
       res = await jsonp('action=batch&b=' + encodeURIComponent(BATCH));
-      saved = (res.trips || []).filter(t => t.photoUrl).length;
-      if (saved >= rows.length) break;
+      const filed = filedKeys(res);
+      saved = wanted.filter(k => filed.indexOf(k) !== -1);
+      if (saved.length >= wanted.length) break;
     } catch (err){ /* keep polling */ }
   }
 
-  if (res && saved >= rows.length){
-    TRIPS = res.trips;
-    rows.forEach(r => delete SHOTS[r]);
-    note.className = 'note ok';
-    note.textContent = 'Saved ' + saved + ' PDFs to Drive.';
+  if (res){
+    // Adopt the server's view either way, so the cards reflect what is filed.
+    TRIPS = res.trips || TRIPS;
+    applyLogs(res);
+    saved.forEach(k => delete SHOTS[k]);
     render();
+  }
+
+  if (res && saved.length >= wanted.length){
+    note.className = 'note ok';
+    note.textContent = 'Saved ' + saved.length + ' PDF' +
+                       (saved.length > 1 ? 's' : '') + ' to Drive.';
   } else if (res){
-    if (saved){ TRIPS = res.trips; render(); }
     note.className = 'note err';
-    if (!saved && !ACCESS_CODE){
+    if (!saved.length && !ACCESS_CODE){
       // Nothing saved and no code to send: the server refused every request.
       note.textContent = 'No access code. Re-scan the QR code on the computer.';
-    } else if (!saved){
+    } else if (!saved.length){
       note.textContent = 'Nothing saved. Your access code may have been ' +
                          'withdrawn — check with the office, or re-scan the QR.';
     } else {
-      note.textContent = saved + ' of ' + rows.length +
+      note.textContent = saved.length + ' of ' + wanted.length +
                          ' saved. Tap Upload again for the rest.';
     }
   } else {
