@@ -278,7 +278,7 @@
   <button class="act" id="addFive">+ 5 rows</button>
   <div style="flex:1"></div>
   <span class="msg" id="msg"></span>
-  <button class="act primary" id="submit">Submit all three logs</button>
+  <button class="act primary" id="submit">Submit all logs</button>
 </div>
 
 <div class="qrwrap" id="qrwrap" hidden>
@@ -535,12 +535,17 @@ let CLIENTS = { "JPL": 450, "NALCO": 520 };
 let TRUCKS  = { "TRK-01": 12, "TRK-02": 12.4 };
 let DRIVERS = [];          // filled from Employees Data (Designation = Driver)
 let EMPLOYEES = [];
+/* name -> designation, inverted from getLists().byRole. The Attendance tab
+   shows Designation as a read-only lookup exactly like the sheet does, so a
+   typo cannot put a driver on the roster as something else. */
+let EMP_ROLE = {};
 const SHIFTS    = ["Day","Night"];
 const FM_TYPES  = ["Fuel","Repair","Maintenance"];
 const CASH_TYPE = ["Credit Received","Expense"];
 const CASH_CAT  = ["Advance Received","Driver Batta","Food/Tea","Toll","Parking",
                    "Loading/Unloading Charges","Weighbridge Fee","Miscellaneous","Other"];
 const CASH_MODE = ["Cash","UPI","Bank Transfer","Driver","Supervisor","Office","Other"];
+const ATT_STATUS = ["Present","Absent","Half Day"];
 let TRUCK_OPT = Object.keys(TRUCKS).concat(["General / Office (Non-Truck)"]);
 let   OPENING_BALANCE = 0;        // running balance carried from the sheet; see note below
 
@@ -634,6 +639,31 @@ const SHEETS = {
       return [["CREDITED TODAY (Rs.)",rs(cin.toFixed(0))],["SPENT TODAY (Rs.)",rs(cout.toFixed(0))],
               ["CLOSING BALANCE (Rs.)",rs((OPENING_BALANCE+cin-cout).toFixed(2))]];
     }
+  },
+  attend:{
+    label:"Daily Attendance", sheet:"Daily Attendance",
+    cols:[
+      {k:"date",   h:"Date",          t:"date",   d:()=>today},
+      {k:"name",   h:"Employee Name", t:"select", o:()=>EMPLOYEES},
+      {k:"desig",  h:"Designation",   t:"calc",   f:r=>EMP_ROLE[r.name]||""},
+      {k:"status", h:"Status",        t:"select", o:()=>ATT_STATUS},
+      {k:"notes",  h:"Notes",         t:"text",   w:240}
+    ],
+    /* A row counts only once a STATUS is picked. The generic rowFilled test
+       would treat a half-typed row — or a name chosen and then abandoned — as
+       submittable, and a blank status writes a 0 day-value that quietly
+       understates man-days. Month, Designation and Day Value are calculated
+       by the sheet, so the form never sends them. */
+    filled: r => String(r.status||"").trim() !== "",
+    kpis:rows=>{
+      const f = rows.filter(r=>String(r.status||"").trim()!=="");
+      const p = f.filter(r=>r.status==="Present").length;
+      const h = f.filter(r=>r.status==="Half Day").length;
+      const a = f.filter(r=>r.status==="Absent").length;
+      return [["PRESENT",p],["HALF DAY",h],["ABSENT",a],
+              ["MAN-DAYS",(p+h*0.5).toFixed(1)],
+              ["MARKED",`${f.length} of ${EMPLOYEES.length||"?"}`]];
+    }
   }
 };
 
@@ -641,7 +671,7 @@ const SHEETS = {
    3. STATE + RENDER
    ============================================================ */
 const blank = key => Object.fromEntries(SHEETS[key].cols.map(c=>[c.k, c.d?c.d():""]));
-const data = {trip:[],fuel:[],cash:[]};
+const data = {trip:[],fuel:[],cash:[],attend:[]};
 Object.keys(data).forEach(k=>{ for(let i=0;i<3;i++) data[k].push(blank(k)); });
 let active = "trip";
 
@@ -713,14 +743,19 @@ function refreshDerived(){
 function renderTabs(){
   document.getElementById("tabs").innerHTML =
     Object.entries(SHEETS).map(([k,s])=>{
-      const filled = data[k].filter(rowFilled).length;
+      const filled = filledRows(k).length;
       return `<button class="tab" role="tab" data-tab="${k}" aria-selected="${k===active}">`
            + `${s.label}${filled?` (${filled})`:""}</button>`;
     }).join("") + '<div class="spacer"></div>';
 }
 
+/* Default test: any value that is not a default counts as typed. Tabs can
+   override it with their own `filled` — see Daily Attendance. */
 const rowFilled = r => Object.values(r).some(
   v => v!=="" && v!=null && v!=="Fuel" && v!=="Expense" && v!==today);
+
+const filledIn = (key, r) => (SHEETS[key].filled || rowFilled)(r);
+const filledRows = key => data[key].filter(r => filledIn(key, r));
 
 /* ---- events ---- */
 document.getElementById("pane").addEventListener("input", e=>{
@@ -769,7 +804,7 @@ document.getElementById("submit").onclick = async ()=>{
                    submittedAt:new Date().toISOString(), blocks:{}};
   let total = 0;
   for(const k of Object.keys(SHEETS)){
-    const rows = data[k].filter(rowFilled).map((r,i,arr)=>{
+    const rows = filledRows(k).map((r,i,arr)=>{
       const out = {};
       SHEETS[k].cols.forEach(c=>{
         const v = c.t==="calc" ? String(c.f(r,i,arr)).replace(/,/g,"")
@@ -856,6 +891,12 @@ function applyLists(L){
   if (L.trucks  && Object.keys(L.trucks).length)  TRUCKS  = L.trucks;
   if (L.drivers && L.drivers.length)              DRIVERS = L.drivers;
   if (L.employees && L.employees.length) EMPLOYEES = L.employees;
+  if (L.byRole){
+    EMP_ROLE = {};
+    Object.keys(L.byRole).forEach(role => {
+      (L.byRole[role]||[]).forEach(nm => { EMP_ROLE[nm] = role; });
+    });
+  }
 
   /* The Cash tab's Truck ID tracks the TRUCK MASTER, like the other two tabs.
      It used to prefer L.costCentres, which getLists() reads from J2:J27 of
@@ -868,7 +909,7 @@ function applyLists(L){
      revenue-rate or truck-capacity edit changes no key, so the old
      key-only comparison missed it and the Truck Capacity column kept showing
      the stale figure until something else forced a render. */
-  const stamp = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
+  const stamp = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT, EMPLOYEES]);
   if (stamp !== LISTS_STAMP){
     LISTS_STAMP = stamp;
     if (document.getElementById('pane').innerHTML) { renderEntry(); renderTabs(); }
@@ -924,9 +965,9 @@ headBtn.onclick = async () => {
   entrySetDot('busy');
   m.style.color = ''; m.textContent = 'Refreshing\u2026';
 
-  const before = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
+  const before = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT, EMPLOYEES]);
   await loadOverall();
-  const after = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT]);
+  const after = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT, EMPLOYEES]);
 
   if (AUTH_ERROR){
     // loadOverall has already locked the page; nothing more to show here.
