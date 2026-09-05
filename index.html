@@ -886,7 +886,7 @@ document.getElementById("submit").onclick = async ()=>{
     Object.keys(data).forEach(k=>{ data[k]=[blank(k),blank(k),blank(k)]; });
     const tripCount = payload.blocks['Daily Trip Log'].length;
     renderEntry(); renderTabs();
-    setTimeout(loadOverall, 1500);
+    setTimeout(() => loadOverall(), 1500);
     if (tripCount) showQR(batchId, tripCount);
   } else {
     // Rows are deliberately NOT cleared — they may not have been saved.
@@ -940,7 +940,7 @@ async function loadOverall(){
   SYNC_FAILED = false;
   let d;
   try {
-    d = await jsonp('action=lists');
+    d = await jsonp('action=lists' + (force ? '&fresh=1' : ''));
   } catch(err){
     SYNC_FAILED = true;
     entrySetDot('off');
@@ -983,7 +983,7 @@ headBtn.onclick = async () => {
   m.style.color = ''; m.textContent = 'Refreshing\u2026';
 
   const before = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT, EMPLOYEES]);
-  await loadOverall();
+  await loadOverall(true);
   const after = JSON.stringify([CLIENTS, TRUCKS, DRIVERS, TRUCK_OPT, EMPLOYEES]);
 
   if (AUTH_ERROR){
