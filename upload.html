@@ -134,28 +134,30 @@ if (QS.get('k')) {
 let TRIPS = [];                 // Daily Trip Log rows from the sheet
 const SHOTS = {};               // card key -> [{id, dataUrl, name}]
 
-/* The two whole-tab uploads. Unlike trips, these are not per row: a batch may
-   have twelve cash entries but they share one card and one PDF, because the
-   paperwork behind them (a fuel bill, a bundle of receipts) is filed as one
-   document. Populated from action=batch; `count` is how many rows the batch
-   wrote to that sheet, `pdfUrl` is set once it has been filed.
+/* The non-trip uploads, grouped by CLIENT.
 
-   Keys are prefixed 'L:' so SHOTS can hold trips (numeric rows) and logs in
-   the same object without a collision. */
-const LOGS = {
-  fuel: { key: 'L:fuel', tag: 'FUEL',
-          label: 'Fuel & Maintenance Log',
-          hint: 'Fuel bills, repair invoices, parts receipts',
-          count: 0, date: '', pdfUrl: '' },
-  cash: { key: 'L:cash', tag: 'CASH',
-          label: 'Cash Log',
-          hint: 'Cash receipts, toll slips, batta acknowledgements',
-          count: 0, date: '', pdfUrl: '' }
+   Unlike trips these are not per row, but they are not per tab either: a
+   batch's cash entries can span clients, and with the Drive tree keyed on
+   client above date there is no single correct folder for a mixed bundle. So
+   one card per (tab x distinct client), each producing its own PDF into its
+   own client folder.
+
+   LOGCARDS is rebuilt from the server on every batch read — the phone never
+   invents a group. Keys are prefixed 'L:' so SHOTS can hold trips (numeric
+   rows) and these in the same object without a collision. */
+const LOG_TABS = {
+  fuel: { tag: 'FUEL', label: 'Fuel & Maintenance' },
+  cash: { tag: 'CASH', label: 'Cash Log' }
 };
 const LOG_KEYS = ['fuel', 'cash'];
+const NO_CLIENT = 'General (No Client)';
 
-/** The log cards that this batch actually needs: no rows means no card. */
-const activeLogs = () => LOG_KEYS.filter(k => LOGS[k].count > 0);
+let LOGCARDS = [];
+
+const logKey = (tab, client) => 'L:' + tab + ':' + (client || '');
+
+/** Every log card this batch needs, in tab then client order. */
+const activeLogs = () => LOGCARDS;
 
 /* ---------- fetch the batch ---------- */
 /* JSONP with a timeout that does not leave a landmine behind.
@@ -188,14 +190,26 @@ function jsonp(params){
   });
 }
 
-/** Copy the server's view of the two log tabs onto LOGS. */
+/** Rebuild LOGCARDS from the server's per-client groups. */
 function applyLogs(res){
   const src = (res && res.logs) || {};
-  LOG_KEYS.forEach(k => {
-    const s = src[k] || {};
-    LOGS[k].count  = Number(s.count || 0);
-    LOGS[k].date   = s.date || '';
-    LOGS[k].pdfUrl = s.pdfUrl || '';
+  LOGCARDS = [];
+  LOG_KEYS.forEach(tab => {
+    const groups = Array.isArray(src[tab]) ? src[tab] : [];
+    groups.forEach(g => {
+      const client = String(g.client || '').trim();
+      LOGCARDS.push({
+        key:    logKey(tab, client),
+        tab:    tab,
+        tag:    LOG_TABS[tab].tag,
+        label:  LOG_TABS[tab].label,
+        client: client,
+        shown:  client || NO_CLIENT,
+        count:  Number(g.count || 0),
+        date:   g.date || '',
+        pdfUrl: g.pdfUrl || ''
+      });
+    });
   });
 }
 
@@ -237,7 +251,7 @@ async function load(){
     }
 
     const stamp = (TRIPS[0] && TRIPS[0].date) ||
-                  LOGS.fuel.date || LOGS.cash.date || '';
+                  (LOGCARDS[0] && LOGCARDS[0].date) || '';
     document.getElementById('sub').textContent =
       [stamp, res.filledBy || '', BATCH].filter(Boolean).join(' · ');
 
@@ -261,12 +275,12 @@ async function load(){
 
 /** Every trip filed and every log tab that has rows filed. */
 const allFiled = () =>
-  TRIPS.every(t => t.photoUrl) && activeLogs().every(k => LOGS[k].pdfUrl);
+  TRIPS.every(t => t.photoUrl) && LOGCARDS.every(c => c.pdfUrl);
 
 /** This batch is finished. Nothing to add, nothing to overwrite. */
 function showClosed(res){
   const trucks = [...new Set(TRIPS.map(t => t.truck).filter(Boolean))].join(', ');
-  const date = (TRIPS[0] && TRIPS[0].date) || LOGS.fuel.date || LOGS.cash.date || '';
+  const date = (TRIPS[0] && TRIPS[0].date) || (LOGCARDS[0] && LOGCARDS[0].date) || '';
   document.getElementById('prog').hidden = true;
   document.getElementById('bar').hidden = true;
   document.getElementById('list').innerHTML = `
@@ -276,8 +290,9 @@ function showClosed(res){
       <p>Documents for this batch were filed and cannot be changed here.</p>
       <div class="facts">
         ${TRIPS.length ? `<div><b>${TRIPS.length}</b> trip${TRIPS.length > 1 ? 's' : ''}</div>` : ''}
-        ${activeLogs().map(k =>
-          `<div><b>${LOGS[k].count}</b> ${esc(LOGS[k].label)} row${LOGS[k].count > 1 ? 's' : ''}</div>`
+        ${LOGCARDS.map(c =>
+          `<div><b>${c.count}</b> ${esc(c.label)} row${c.count > 1 ? 's' : ''}
+             &mdash; ${esc(c.shown)}</div>`
         ).join('')}
         ${date ? `<div><b>${esc(date)}</b></div>` : ''}
         ${trucks ? `<div><b>${esc(trucks)}</b></div>` : ''}
@@ -332,26 +347,25 @@ function tripCard(t){
     </div>`;
 }
 
-function logCard(k){
-  const L = LOGS[k];
-  const has = L.pdfUrl || (SHOTS[L.key] || []).length;
+function logCard(c){
+  const has = c.pdfUrl || (SHOTS[c.key] || []).length;
   return `
-    <div class="card ${has ? 'done' : ''}" data-log="${k}">
+    <div class="card ${has ? 'done' : ''}" data-log="${esc(c.key)}">
       <div class="chead">
-        <span class="truck log">${esc(L.tag)}</span>
+        <span class="truck log">${esc(c.tag)}</span>
         <div class="meta">
-          <div class="l1">${esc(L.label)}</div>
-          <div class="l2">${L.count} entr${L.count === 1 ? 'y' : 'ies'}${L.date ? ' · ' + esc(L.date) : ''}</div>
+          <div class="l1">${esc(c.label)} &middot; ${esc(c.shown)}</div>
+          <div class="l2">${c.count} entr${c.count === 1 ? 'y' : 'ies'}${c.date ? ' · ' + esc(c.date) : ''}</div>
         </div>
-        <span class="tick">${cardTick(L.pdfUrl, L.key)}</span>
+        <span class="tick">${cardTick(c.pdfUrl, c.key)}</span>
       </div>
-      ${shotStrip(L.key, L.pdfUrl)}
+      ${shotStrip(c.key, c.pdfUrl)}
     </div>`;
 }
 
 function render(){
   const list = document.getElementById('list');
-  const logs = activeLogs();
+  const logs = LOGCARDS;
 
   /* Trips first, then the two whole-tab cards under their own heading. The
      order is deliberate: trip paperwork is the part that must not be missed,
@@ -359,8 +373,8 @@ function render(){
   let html = TRIPS.map(tripCard).join('');
   if (logs.length){
     html += `<div class="sectionhead">Bills &amp; receipts
-      <span>One PDF per tab, covering the whole day. Add every bill and
-        receipt behind these entries.</span></div>`
+      <span>One PDF per client. Add every bill and receipt behind that
+        client's entries.</span></div>`
       + logs.map(logCard).join('');
   }
   list.innerHTML = html +
@@ -369,7 +383,7 @@ function render(){
   /* Progress counts trips and log cards together, so "6 of 8" means the
      operator has six of the eight things this batch needs. */
   const cards = TRIPS.map(t => ({ key: String(t.row), filed: !!t.photoUrl }))
-    .concat(logs.map(k => ({ key: LOGS[k].key, filed: !!LOGS[k].pdfUrl })));
+    .concat(logs.map(c => ({ key: c.key, filed: !!c.pdfUrl })));
 
   const done = cards.filter(c => c.filed || (SHOTS[c.key] || []).length).length;
   const total = cards.reduce((s, c) => s + (SHOTS[c.key] || []).length, 0);
@@ -637,10 +651,9 @@ function pdfForTrip(trip, shots){
                          trip.client].filter(Boolean).join('  |  '));
 }
 
-function pdfForLog(k, shots){
-  const L = LOGS[k];
-  return pdfFrom(shots, [L.label, L.date,
-                         L.count + ' entr' + (L.count === 1 ? 'y' : 'ies'),
+function pdfForLog(c, shots){
+  return pdfFrom(shots, [c.label, c.shown, c.date,
+                         c.count + ' entr' + (c.count === 1 ? 'y' : 'ies'),
                          BATCH].filter(Boolean).join('  |  '));
 }
 
@@ -673,10 +686,10 @@ document.getElementById('send').onclick = async () => {
                   name: 'Trip ' + (t.tripNo || t.row) });
     }
   });
-  activeLogs().forEach(k => {
-    const key = LOGS[k].key;
-    if (!LOGS[k].pdfUrl && (SHOTS[key] || []).length){
-      jobs.push({ type: 'log', key: key, log: k, name: LOGS[k].label });
+  LOGCARDS.forEach(c => {
+    if (!c.pdfUrl && (SHOTS[c.key] || []).length){
+      jobs.push({ type: 'log', key: c.key, card: c,
+                  name: c.label + ' — ' + c.shown });
     }
   });
   if (!jobs.length) return;
@@ -692,7 +705,7 @@ document.getElementById('send').onclick = async () => {
     try {
       pdfB64 = job.type === 'trip'
         ? pdfForTrip(job.trip, shots)
-        : pdfForLog(job.log, shots);
+        : pdfForLog(job.card, shots);
     } catch (err){
       note.className = 'note err';
       note.textContent = 'Could not build the PDF for ' + job.name + '.';
@@ -707,8 +720,9 @@ document.getElementById('send').onclick = async () => {
       await post(job.type === 'trip'
         ? { kind: 'photos', batchId: BATCH, row: Number(job.key),
             pages: shots.length, trip: job.trip, pdfBase64: pdfB64 }
-        : { kind: 'logphotos', batchId: BATCH, log: job.log,
-            pages: shots.length, pdfBase64: pdfB64 });
+        : { kind: 'logphotos', batchId: BATCH, log: job.card.tab,
+            client: job.card.client, pages: shots.length,
+            pdfBase64: pdfB64 });
       sent++;
     } catch (err){
       note.className = 'note err';
@@ -729,8 +743,11 @@ document.getElementById('send').onclick = async () => {
   const filedKeys = r => {
     const out = [];
     (r.trips || []).forEach(t => { if (t.photoUrl) out.push(String(t.row)); });
-    LOG_KEYS.forEach(k => {
-      if (r.logs && r.logs[k] && r.logs[k].pdfUrl) out.push(LOGS[k].key);
+    LOG_KEYS.forEach(tab => {
+      const groups = (r.logs && Array.isArray(r.logs[tab])) ? r.logs[tab] : [];
+      groups.forEach(g => {
+        if (g.pdfUrl) out.push(logKey(tab, String(g.client || '').trim()));
+      });
     });
     return out;
   };
